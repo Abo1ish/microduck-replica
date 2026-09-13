@@ -1,6 +1,6 @@
 # 3D 打印件
 
-> 🖨️ **不想看图直接打**：[拓竹 MakerWorld · microduck 飞特版](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428)，一键切片。
+> 🖨️ **不想看图直接打**：[拓竹 MakerWorld · microduck 飞特版](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428) 一键切片，或 [Bambu Studio 工程 `.3mf`](https://github.com/fanhao375/microduck-replica-cad/tree/master/打印)（5 盘排好的）。
 > 🛒 耗材、紧固件、热熔螺母与压头的采购链接见 [机械采购清单](../docs/机械采购清单.md)。
 
 **简体中文** · [English](README.en.md)

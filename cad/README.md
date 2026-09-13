@@ -7,7 +7,7 @@
 
 | 要什么 | 去哪 |
 |---|---|
-| **直接打印**，不想看图 | 🖨️ [拓竹 MakerWorld · microduck 飞特版](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428) —— 一键切片 |
+| **直接打印**，不想看图 | 🖨️ [拓竹 MakerWorld · microduck 飞特版](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428) 一键切片；或下 [Bambu Studio 工程 `.3mf`](https://github.com/fanhao375/microduck-replica-cad/tree/master/打印)（5 盘排好的，4.9 MB） |
 | **可编辑的 SolidWorks 源文件** | 📦 [microduck-replica-cad](https://github.com/fanhao375/microduck-replica-cad) 的 **Releases 页**（右边栏，**不在文件列表里**）。飞特 HD-1910 版 v2.0，原版 v1.0 |
 | 单个零件的 STL、要打几份 | [`../print/`](../print/) |
 | 装配步骤 | [装配安装说明书 PDF](https://github.com/fanhao375/microduck-replica-cad/blob/master/安装说明书/microduck装配安装说明书.pdf)（21 页） |
