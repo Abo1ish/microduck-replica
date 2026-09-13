@@ -81,27 +81,23 @@ the bottom. All 23 nets connected, **DRC clean**, every IC power pin has a 100nF
 </td>
 <td width="50%" valign="top">
 
-### 🔨 Mechanical · editable CAD is done
+### 🔨 Mechanical · Feetech HD-1910 build is assembled
 
-<a href="https://github.com/fanhao375/microduck-replica-cad"><img src="assets/cad-solidworks-装配体.png" alt="SolidWorks assembly"></a>
+<a href="BUILD-LOG.en.md"><img src="build-log/photos/2026-09-13-飞特版装机-正面.jpg" alt="Feetech HD-1910 build"></a>
 
-**The whole robot went from mesh to editable parametric models** — **16 assemblies +
-40 parts** of SolidWorks source, plus a **21-page assembly manual**: every one of the
-15 components gets its own steps, figures and cautions, with build order and
-left/right part warnings.
+**All 15 Feetech HD-1910 servos configured and mounted.** Not the official XL330 — half the
+price, 2.5× the torque, running inside its rated voltage; the path argued in
+[Actuator Selection](docs/actuator-selection.en.md), now physical.
 
-**Modelled and written by 机械行者Robo.** Everything under `cad/` and `print/` here is
-STL — printable, viewable, measurable, but **not editable**. To change dimensions, wall
-thickness, or generate your own drawings, **get the source files there**.
+**The HD-1910 horn protrudes where the XL330's is recessed**, so the 8 parts that mate with
+horns were remodelled and reprinted. The editable SolidWorks drawings have an FT variant
+(`-FT` suffix) with what changed and why.
 
-Meanwhile the first printed parts are assembled: **the M2 screws went into the leg parts**,
-so [Fastener Reconstruction](docs/fastener-reconstruction.en.md) holds on real hardware.
-
-**[SolidWorks drawings + assembly manual](https://github.com/fanhao375/microduck-replica-cad)**　·　
-[Build Log](BUILD-LOG.en.md)　·　
-[Printable parts](print/)　·　
-[Exploded views](assembly-drawings/)
-
+**[Build Log](BUILD-LOG.en.md)**　·
+**[Feetech-variant SolidWorks drawings](https://github.com/fanhao375/microduck-replica-cad)**　·
+**[Print on MakerWorld (Feetech build)](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428)**　·
+[Debug Log](调试记录.md)　·
+[Printable parts](print/)
 </td>
 </tr>
 </table>

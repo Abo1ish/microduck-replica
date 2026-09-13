@@ -77,6 +77,7 @@ STM32G031F8P6 + LSM6DSV16X + 半双工缓冲，作为**第 16 个设备**挂在�
 
 **[构建日志](构建日志.md)**　·
 **[飞特版 SolidWorks 图纸](https://github.com/fanhao375/microduck-replica-cad)**　·
+**[拓竹一键打印](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428)**　·
 [调试记录](调试记录.md)　·
 [打印件清单](print/)
 </td>
@@ -155,6 +156,7 @@ STM32G031F8P6 + LSM6DSV16X + 半双工缓冲，作为**第 16 个设备**挂在�
 
 | 目录 | 数量 |
 |---|---|
+| 🖨️ [**拓竹 MakerWorld · microduck**](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428) | **不想看图直接打** —— 一键切片，Bambu 打印机直接开 |
 | [`print/打印件/`](print/打印件/) | **30 种 / 41 件**结构件 |
 | [`print/标准件-无需打印/`](print/标准件-无需打印/) | **9 个**外购件模型（对位用） |
 
@@ -176,7 +178,7 @@ STM32G031F8P6 + LSM6DSV16X + 半双工缓冲，作为**第 16 个设备**挂在�
 本仓库的 `cad/` 与 `print/` 都是**网格（STL）**—— 能打印、能看、能测量，但**改不动**。
 
 **[fanhao375/microduck-replica-cad](https://github.com/fanhao375/microduck-replica-cad)**
-是配套的三维图纸仓库，放的是**可编辑的 SolidWorks 源文件**：
+是配套的三维图纸仓库，放的是**可编辑的 SolidWorks 源文件**（📦 **压缩包在那个仓库的 Releases 页，不在文件列表里**）：
 16 个装配体 + 40 个零件，外加一份 **21 页的装配安装说明书**（含每个组件的步骤、配图与注意事项）。
 
 > 那套图纸由 **[机械行者Robo](https://github.com/fanhao375/microduck-replica-cad#图纸作者机械行者Robo)**

@@ -1,5 +1,6 @@
 # 3D 打印件
 
+> 🖨️ **不想看图直接打**：[拓竹 MakerWorld · microduck 飞特版](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428)，一键切片。
 > 🛒 耗材、紧固件、热熔螺母与压头的采购链接见 [机械采购清单](../docs/机械采购清单.md)。
 
 **简体中文** · [English](README.en.md)
