@@ -42,15 +42,51 @@
 
 ## 第 1 步 · 主控点亮，什么都别接
 
+**镜像**：Armbian **Debian 13 (trixie) · minimal · vendor 内核 6.1.115** —— 官方 `install.sh` 要的就是这个内核。
+国内镜像站直链（Armbian 官方 dl 会自动跳到这儿）：
+
 ```
-1  焊排针 —— 先焊对角两针，翻过来看立直了没，再焊其余 38 个
-2  下 Armbian：官方目标是 Armbian 26.2.x（install.sh 第 7 行），Radxa Zero 3 的 headless/minimal 镜像
-3  balenaEtcher 或 dd 烧到 microSD
-4  插卡，USB-C 供电（先用 USB，别用飞线的 5 V）
-5  路由器里找到它的 IP，ssh 进去（Armbian 首次登录会让你设密码、建用户）
+https://mirrors.bfsu.edu.cn/armbian-releases/radxa-zero3/archive/Armbian_26.8.1_Radxa-zero3_trixie_vendor_6.1.115_minimal.img.xz
 ```
 
-点亮了再往下。**点不亮的问题别跟接线的问题混在一起。**
+376 MB。别选 `current_6.18` 那个（主线内核，官方没验证过），别选桌面版（用不上）。版本号 26.8.1 比官方文档写的 26.2.x 新，内核一样，`setup-board.sh` 是幂等的，有问题它会报。
+
+```
+1  焊排针 —— 先焊对角两针，翻过来看立直了没，再焊其余 38 个
+2  balenaEtcher（Windows 免装）：选 .img.xz → 选 microSD → Flash，会自动校验
+3  插卡，充电头 5V/2A 插 USB 2.0 OTG 口（电源口），别用电脑 USB
+```
+
+**第一次开机要设 root 密码、建用户、连 WiFi**。Armbian 的向导同时出现在 HDMI 和串口上，三条路任选：
+
+| 路 | 要什么 | 怎么做 |
+|---|---|---|
+| **A · 串口**（硬件工程师首选） | 任意 USB 转 TTL 模块（CH340 / CH343 / FT232，**CP2102 不行**，跑不到 1.5 M） | 模块 TX → pin 10，RX → pin 8，GND → pin 6，**3.3 V 电平**。电脑串口终端 **1500000 8N1**。上电就看到向导 |
+| B · 屏幕 | micro-HDMI 线 + USB 键盘（经 Type-C 转接插 HOST 口） | 插上开机，向导在屏幕上 |
+| C · 预设文件 | 能写 ext4 的环境（WSL / Linux） | 烧完卡在根分区写 `/root/.not_logged_in_yet`，开机全自动。内容见下 |
+
+向导里：设 root 密码 → 建普通用户（比如 `duck`）→ 选 WiFi 连上。完了 `ip a` 看 IP，以后都 ssh。
+
+**C 那个文件**（[Armbian 文档](https://docs.armbian.com/user-guide/autoconfig/)）：
+
+```bash
+PRESET_NET_CHANGE_DEFAULTS=1
+PRESET_NET_WIFI_ENABLED=1
+PRESET_NET_WIFI_SSID='你的WiFi名'
+PRESET_NET_WIFI_KEY='你的WiFi密码'
+PRESET_NET_WIFI_COUNTRYCODE='CN'
+PRESET_ROOT_PASSWORD='root密码'
+PRESET_USER_NAME='duck'
+PRESET_USER_PASSWORD='用户密码'
+PRESET_LOCALE='en_US.UTF-8'
+PRESET_TIMEZONE='Asia/Shanghai'
+```
+
+⚠️ 密码明文存在卡上，跑通后删掉这个文件。
+
+**A 路用的就是 UART2 = 舵机总线那两个脚。** 首次开机借它当控制台没问题，第 2 步做完它就归舵机了 —— 走 USB 版转接板的话第 2 步可以不做，串口留着当控制台反而方便。
+
+点亮了、能 ssh 了再往下。**点不亮的问题别跟接线的问题混在一起。**
 
 ## 第 2 步 · 让 `/dev/ttyS2` 出现
 
