@@ -44,10 +44,10 @@ This repository is what falls out of reading both.
 
 A WeChat group for people working on the same thing — build progress, pitfalls, sourcing.
 
-**Groups 1–4 are full (200 members each — WeChat's cap for QR joins).** The code below is for **group 5**.
+**Groups 1–5 are full (200 members each — WeChat's cap for QR joins).** The code below is for **group 6**.
 
 <div align="center">
-  <img src="assets/wechat-group.png" alt="Microduck replica WeChat group" width="280">
+  <img src="assets/wechat-group-6.png" alt="Microduck replica WeChat group" width="280">
   <br>
   <sub><b>Duck Replica Group 6 · expires 2026-09-22</b> — WeChat group codes are valid for 7 days<br>
   If it has expired, open an <a href="https://github.com/fanhao375/microduck-replica/issues">issue</a> and I will post a fresh one</sub>
