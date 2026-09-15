@@ -24,6 +24,24 @@ MJCF 里包含了完整的运动学树：每个零件挂在谁身上、相对位
 
 ---
 
+## 两条路线，选一条走
+
+本仓库同时覆盖两种舵机。**机械、电路、软件三层都有差别**，动手前先定：
+
+| | 原版 · Dynamixel XL330 | 飞特 · HD-1910 |
+|---|---|---|
+| **舵机** | XL330-M288-T ×15 | HD-1910-C001 ×15 —— 便宜一半、力矩 2.5 倍 |
+| **电压** | 额定 6 V，实跑 6.6–8.2 V，**超压 37%** | 额定 4–8.4 V，在额定内；但满电 8.4 V 顶格 |
+| **打印件** | [`print/`](print/) 上游 STL 直接打 | **8 个配合件要改**（HD-1910 舵盘凸、XL330 凹）—— [拓竹一键打印](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428) / [3mf](https://github.com/fanhao375/microduck-replica-cad/tree/master/打印) |
+| **可编辑图纸** | [图纸仓 v1.1](https://github.com/fanhao375/microduck-replica-cad/releases/tag/v1.1) | [图纸仓 v2.0](https://github.com/fanhao375/microduck-replica-cad/releases/tag/v2.0)，文件带 `-FT` 后缀 |
+| **电路** | 官方 HAT + [`imu_to_dxl`](hardware/imu_to_dxl/) | 同左；舵机连接器 2.0 mm（官方 2.5），`imu_to_dxl` 板上 J4/J5 是 2.0 |
+| **软件** | 官方运行时直接跑 | 总线协议不同，要换协议模块；策略要按 HD-1910 重训 —— [训练前数据清单](docs/HD-1910训练前数据清单.md) |
+| **状态** | 纸上分析 + 首批打印件 | **整机装出实物**（2026-09-13），台架通总线中 |
+
+选型论证在 [执行器选型](docs/执行器选型.md)。本仓库主线走飞特；原版资料同样齐全，两条都能复刻。
+
+---
+
 ## 交流群
 
 有人在做同样的事，凑了个微信群一起讨论复刻进度、踩过的坑、元件采购。

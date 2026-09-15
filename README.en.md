@@ -40,6 +40,24 @@ This repository is what falls out of reading both.
 
 ---
 
+## Two tracks — pick one
+
+This repository covers two servo choices. **Mechanics, electronics and software all differ**, so decide before building:
+
+| | Original · Dynamixel XL330 | Feetech · HD-1910 |
+|---|---|---|
+| **Servos** | XL330-M288-T ×15 | HD-1910-C001 ×15 — half the price, 2.5× the torque |
+| **Voltage** | rated 6 V, run at 6.6–8.2 V, **37% over** | rated 4–8.4 V, within spec; a full pack sits at the 8.4 V ceiling |
+| **Printed parts** | [`print/`](print/) upstream STLs as-is | **8 mating parts remodelled** (HD-1910 horn protrudes, XL330's is recessed) — [MakerWorld](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428) / [3mf](https://github.com/fanhao375/microduck-replica-cad/tree/master/打印) |
+| **Editable CAD** | [CAD repo v1.1](https://github.com/fanhao375/microduck-replica-cad/releases/tag/v1.1) | [CAD repo v2.0](https://github.com/fanhao375/microduck-replica-cad/releases/tag/v2.0), files carry an `-FT` suffix |
+| **Electronics** | official HAT + [`imu_to_dxl`](hardware/imu_to_dxl/) | same; servo connectors are 2.0 mm (official 2.5), `imu_to_dxl` has J4/J5 at 2.0 |
+| **Software** | official runtime runs as-is | different bus protocol, swap the protocol module; policy retrained for HD-1910 — [training data checklist](docs/HD-1910训练前数据清单.md) |
+| **Status** | paper analysis + first prints | **full robot assembled** (2026-09-13), bus bring-up in progress |
+
+The selection argument is in [Actuator Selection](docs/actuator-selection.en.md). This repo's main line is Feetech; the original track is documented just as fully.
+
+---
+
 ## Community
 
 A WeChat group for people working on the same thing — build progress, pitfalls, sourcing.
