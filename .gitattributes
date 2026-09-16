@@ -30,3 +30,5 @@
 # EDA 工程
 *.eprj2 binary
 *.epro2 binary
+*.sh text eol=lf
+*.ps1 text eol=crlf

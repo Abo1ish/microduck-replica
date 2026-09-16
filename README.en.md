@@ -115,6 +115,7 @@ horns were remodelled and reprinted. The editable SolidWorks drawings have an FT
 **[Feetech-variant SolidWorks drawings](https://github.com/fanhao375/microduck-replica-cad)**　·
 **[Print on MakerWorld (Feetech build)](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428)**　·
 [Debug Log](调试记录.md)　·
+**[BOM with purchase links](https://github.com/fanhao375/microduck-replica-cad#装配-bom)**　·
 [Printable parts](print/)
 </td>
 </tr>

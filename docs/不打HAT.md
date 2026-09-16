@@ -42,86 +42,73 @@
 
 ## 第 1 步 · 主控点亮，什么都别接
 
-**镜像**：Armbian **Debian 13 (trixie) · minimal · vendor 内核 6.1.115** —— 官方 `install.sh` 要的就是这个内核。
-国内镜像站直链（Armbian 官方 dl 会自动跳到这儿）：
+> ⚠️ **2024-11 以后买的 Zero 3W 是 V1.12 版（WiFi 模组 AIC8800），Armbian 官方镜像直接烧是起不来的**：
+> 灯双闪、永远进不了系统、局域网里找不到。原因是 Armbian 给这块板配的主线 U-Boot（内存初始化固件是 2024-01 的 v1.21）
+> 带不起新板，换成瑞莎自家的引导程序就好。瑞莎官方系统能起、Armbian 起不来，就是这个。
+> 我们花了两天、烧了九次卡才定位到，见[踩坑记录](../踩坑记录.md)。下面的做卡脚本已经把这一步和其它坑一起处理了。
+
+**镜像**：Armbian **26.2.1 · Debian 13 (trixie) · minimal · vendor 内核 6.1.115**，Pollen 官方文档指定的版本。
+国内镜像站现在只剩 26.8.1，26.2.1 在这（376 MB）：
 
 ```
-https://mirrors.bfsu.edu.cn/armbian-releases/radxa-zero3/archive/Armbian_26.8.1_Radxa-zero3_trixie_vendor_6.1.115_minimal.img.xz
+https://fi.mirror.armbian.de/archive/radxa-zero3/archive/Armbian_26.2.1_Radxa-zero3_trixie_vendor_6.1.115_minimal.img.xz
 ```
 
-376 MB。别选 `current_6.18` 那个（主线内核，官方没验证过），别选桌面版（用不上）。版本号 26.8.1 比官方文档写的 26.2.x 新，内核一样，`setup-board.sh` 是幂等的，有问题它会报。
+别选 `current_6.18`（主线内核，官方运行时不认），别选桌面版。
+
+**1a · 做卡**（把 WiFi、密码、引导程序、串口全打进镜像，烧完插上就能 ssh）
+
+仓库 [`tools/radxa/`](../tools/radxa/) 三个文件复制到本地任一目录，电脑上要有 WSL2（没有就管理员 PowerShell 跑 `wsl --install`，重启一次）：
+
+1. 记事本打开 `card.conf`，改 WiFi 名和密码。用户名密码默认 `duck` / `duck1234`。国内要装官方软件的话，`HTTP_PROXY=` 填电脑上代理的地址（比如 Clash 开「允许局域网」，填 `http://电脑IP:7890`）。
+2. 右键 `1-做卡.ps1` → 「使用 PowerShell 运行」，选下载的 `.img.xz`。它在 WSL 里解压、换引导、写配置，一分钟出一个 `xxx-鸭子卡.img`（2.2 GB）。
+3. 排针先焊好：先焊对角两针，翻过来看立直了没，再焊其余 38 个。
+
+**1b · 烧卡**（Rufus 便携版，2 MB 不用装）
+
+1. [rufus.ie](https://rufus.ie/zh/) 下 `rufus-x.xxp.exe`。读卡器插电脑，**只插这一个 U 盘类设备**，双击 Rufus。问要不要联网查更新，点**否**：
+
+   <img src="../assets/flash/烧卡-1-Rufus问更新-点否.png" width="420">
+
+2. 「设备」会自动选中读卡器。点「**选择**」，挑上面生成的 `xxx-鸭子卡.img`：
+
+   <img src="../assets/flash/烧卡-2-设备自动选中-点选择.png" width="380">
+
+3. 「**开始**」，弹「卡上数据将被清除」点确定，写入约 2 分钟：
+
+   <img src="../assets/flash/烧卡-3-正在写入.png" width="380">
+
+4. 状态栏回到「准备就绪」就完了，关掉 Rufus，拔卡。**中间 Windows 会弹好几次「是否格式化磁盘」，全部点取消**，它不认 Linux 分区，正常。
+
+   <img src="../assets/flash/烧卡-4-完成-准备就绪.png" width="380">
+
+**1c · 开机、找 IP、ssh**
+
+卡插 Radxa，5V 充电头（苹果 20W 那种就行，别用华为快充头）插 **`5V IN / USB_OTG` 口**（板子背面丝印，靠 TF 卡槽那头）。
+等 2 到 3 分钟，它自己连 WiFi。看灯：**双闪几秒 → 双闪两分钟 → 常亮** 就是起来了；一直双闪不变，就是没起来。
+路由器后台找一台叫 `radxa-zero3` 的设备拿 IP，Windows 自带 ssh：
 
 ```
-1  焊排针 —— 先焊对角两针，翻过来看立直了没，再焊其余 38 个
-2  balenaEtcher（Windows 免装）：选 .img.xz → 选 microSD → Flash，会自动校验
-3  插卡，充电头 5V/2A 插 USB 2.0 OTG 口（电源口），别用电脑 USB
+ssh duck@那个IP        # 密码就是 card.conf 里那个
 ```
 
-**第一次开机要设 root 密码、建用户、连 WiFi**。Armbian 的向导同时出现在 HDMI 和串口上，三条路任选：
-
-| 路 | 要什么 | 怎么做 |
-|---|---|---|
-| **A · 串口**（硬件工程师首选） | 任意 USB 转 TTL 模块（CH340 / CH343 / FT232，**CP2102 不行**，跑不到 1.5 M） | 模块 TX → pin 10，RX → pin 8，GND → pin 6，**3.3 V 电平**。电脑串口终端 **1500000 8N1**。上电就看到向导 |
-| B · 屏幕 | micro-HDMI 线 + USB 键盘（经 Type-C 转接插 HOST 口） | 插上开机，向导在屏幕上 |
-| C · 预设文件 | 能写 ext4 的环境（WSL / Linux） | 烧完卡在根分区写 `/root/.not_logged_in_yet`，开机全自动。内容见下 |
-
-向导里：设 root 密码 → 建普通用户（比如 `duck`）→ 选 WiFi 连上。完了 `ip a` 看 IP，以后都 ssh。
-
-**C 那个文件**（[Armbian 文档](https://docs.armbian.com/user-guide/autoconfig/)）：
-
-```bash
-PRESET_NET_CHANGE_DEFAULTS=1
-PRESET_NET_WIFI_ENABLED=1
-PRESET_NET_WIFI_SSID='你的WiFi名'
-PRESET_NET_WIFI_KEY='你的WiFi密码'
-PRESET_NET_WIFI_COUNTRYCODE='CN'
-PRESET_ROOT_PASSWORD='root密码'
-PRESET_USER_NAME='duck'
-PRESET_USER_PASSWORD='用户密码'
-PRESET_LOCALE='en_US.UTF-8'
-PRESET_TIMEZONE='Asia/Shanghai'
-```
-
-⚠️ 密码明文存在卡上，跑通后删掉这个文件。
-
-**A 路用的就是 UART2 = 舵机总线那两个脚。** 首次开机借它当控制台没问题，第 2 步做完它就归舵机了 —— 走 USB 版转接板的话第 2 步可以不做，串口留着当控制台反而方便。
+**多一条命：这根 USB 线同时是串口。** 把板子的 `5V IN` 口插到电脑 USB 口（电脑给它供电），设备管理器里会多一个「USB 串行设备 (COMx)」，
+串口终端 115200 打开就是登录提示，root 密码在 `card.conf`。WiFi 连不上、ssh 进不去，都从这儿进去看。
 
 点亮了、能 ssh 了再往下。**点不亮的问题别跟接线的问题混在一起。**
 
 ## 第 2 步 · 让 `/dev/ttyS2` 出现
 
-**这是不打 HAT 最容易卡住的地方。** Armbian 出厂设置下 `/dev/ttyS2` 根本不存在，板子却一切正常，你会以为是线接错了。
-
-官方 `setup-board.sh` 做四件事，你可以直接跑它，也可以手工做：
+做卡脚本已经开好了：extlinux 里挂了 `uart2-m0` overlay，内核控制台放在 tty1，`serial-getty@ttyS2` 和 `ttyFIQ0` 都 mask 掉了。ssh 进去确认一下：
 
 ```bash
-# ① overlay 前缀 —— Armbian 出厂写的是 rk35xx，但 RK3566 的 overlay 文件叫 rk3568-*.dtbo
-#    前缀错了加载器什么都找不到，静默失败
-sudo sed -i 's/^overlay_prefix=rk35xx$/overlay_prefix=rk3568/' /boot/armbianEnv.txt
-
-# ② 开 uart2 的 M0 引脚复用 —— 这就是 40 针的 pin 8 / pin 10
-echo 'overlays=uart2-m0' | sudo tee -a /boot/armbianEnv.txt
-
-# ③ 内核 console 默认占着 ttyS2（它是 RK3566 的调试串口）—— 从 /boot/armbianEnv.txt 的
-#    extraargs 里把 console=ttyS2,1500000 拿掉，不然内核往舵机总线上打日志
-
-# ④ 登录控制台也占着它
-sudo systemctl mask serial-getty@ttyS2
-
-sudo reboot
-ls -l /dev/ttyS2          # 出现了才算过
-fuser -v /dev/ttyS2       # 应该什么都不占
+ls -l /dev/ttyS2            # 有
+sudo fuser -v /dev/ttyS2    # 没人占
+cat /proc/cmdline           # 里面没有 console=ttyS2 / ttyFIQ0
 ```
 
-⚠️ **`apt upgrade` 换内核后可能把 ① 打回原形。** 舵机突然全不动了，先看这条。
-
-直接跑官方脚本的话（上游仓库是公开的，不用 token）：
-
-```bash
-git clone https://github.com/pollen-robotics/microduck
-sudo sh microduck/scripts/setup-board.sh    # 幂等，不自动重启
-sudo reboot
-```
+官方 `setup-board.sh` 会去改 `/boot/armbianEnv.txt` 的 `overlay_prefix` / `overlays` / `console`，在这张卡上不生效（瑞莎 U-Boot 走 extlinux，不读 boot.scr），
+但它自己的检查项都能过，照跑不误。**`apt upgrade` 升级了内核包的话 extlinux.conf 里的文件名要跟着改**，升级前先看 `/boot/extlinux/extlinux.conf`。
 
 ## 第 3 步 · 电源，每接一段量一次
 

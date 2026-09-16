@@ -96,6 +96,7 @@ STM32G031F8P6 + LSM6DSV16X + 半双工缓冲，作为**第 16 个设备**挂在�
 **[构建日志](构建日志.md)**　·
 **[飞特版 SolidWorks 图纸](https://github.com/fanhao375/microduck-replica-cad)**　·
 **[拓竹一键打印](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428)**　·
+**[BOM 清单 · 带采购链接](https://github.com/fanhao375/microduck-replica-cad#装配-bom)**　·
 [调试记录](调试记录.md)　·
 [打印件清单](print/)
 </td>
