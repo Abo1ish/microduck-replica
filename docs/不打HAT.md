@@ -110,6 +110,8 @@ cat /proc/cmdline           # 里面没有 console=ttyS2 / ttyFIQ0
 官方 `setup-board.sh` 会去改 `/boot/armbianEnv.txt` 的 `overlay_prefix` / `overlays` / `console`，在这张卡上不生效（瑞莎 U-Boot 走 extlinux，不读 boot.scr），
 但它自己的检查项都能过，照跑不误。**`apt upgrade` 升级了内核包的话 extlinux.conf 里的文件名要跟着改**，升级前先看 `/boot/extlinux/extlinux.conf`。
 
+同理，以后要加 overlay（比如摄像头 `rk3568-radxa-zero3-rpi-camera-v2.dtbo`，`setup-board.sh` 会把它镜像到这个名字），往 extlinux.conf 的 `fdtoverlays` 那行末尾加路径，重启。没接摄像头时 `mediad` 会一直重启，`robotctl health` 其它项不受影响，正常。
+
 ## 第 3 步 · 电源，每接一段量一次
 
 ```
