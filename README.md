@@ -35,8 +35,8 @@ MJCF 里包含了完整的运动学树：每个零件挂在谁身上、相对位
 | **打印件** | [`print/`](print/) 上游 STL 直接打 | **8 个配合件要改**（HD-1910 舵盘凸、XL330 凹）—— [拓竹一键打印](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428) / [3mf](https://github.com/fanhao375/microduck-replica-cad/tree/master/打印) |
 | **可编辑图纸** | [图纸仓 v1.1](https://github.com/fanhao375/microduck-replica-cad/releases/tag/v1.1) | [图纸仓 v2.0](https://github.com/fanhao375/microduck-replica-cad/releases/tag/v2.0)，文件带 `-FT` 后缀 |
 | **电路** | 官方 HAT + [`imu_to_dxl`](hardware/imu_to_dxl/) | 同左；舵机连接器 2.0 mm（官方 2.5），`imu_to_dxl` 板上 J4/J5 是 2.0 |
-| **软件** | 官方运行时直接跑 | 总线协议不同，要换协议模块；策略要按 HD-1910 重训 —— [训练前数据清单](docs/HD-1910训练前数据清单.md) |
-| **状态** | 纸上分析 + 首批打印件 | **整机装出实物**（2026-09-13），台架通总线中 |
+| **软件** | 官方运行时直接跑 | 总线协议不同，要换协议模块 —— [适配架构分析](software/飞特适配架构.md)；策略要按 HD-1910 重训 —— [训练前数据清单](docs/HD-1910训练前数据清单.md) |
+| **状态** | 纸上分析 + 首批打印件 | **整机装出实物**（2026-09-13），**15 颗上总线、能站起来坐下**（2026-09-18），零位和站姿还在调 |
 
 选型论证在 [执行器选型](docs/执行器选型.md)。本仓库主线走飞特；原版资料同样齐全，两条都能复刻。
 
@@ -61,23 +61,20 @@ MJCF 里包含了完整的运动学树：每个零件挂在谁身上、相对位
 <tr>
 <td width="50%" valign="top">
 
-### 🔌 电气 · `imu_to_dxl` PCB 画完了
+### 🔌 电气 · 15 颗舵机整机上电，站起来了（2026-09-18）
 
-<a href="hardware/imu_to_dxl/"><img src="assets/hw/imu_to_dxl-PCB.png" alt="imu_to_dxl PCB 顶层装配图"></a>
+<p align="center"><a href="assets/首次上电-2026-09-18.mp4"><img src="assets/首次上电-站起来.gif" alt="第一次上电：从缩着站起来（点开看 30 秒视频）" width="220"></a></p>
 
-官方唯一**没有开源**的那块板，第三方复刻版从原理图一路做到了 PCB。
-STM32G031F8P6 + LSM6DSV16X + 半双工缓冲，作为**第 16 个设备**挂在舵机总线上。
+装好的鸭子第一次接总线：URT-2 走 USB、7.4 V 进 V1，**15 颗 HD-1910 全部在线，0 超时 0 校验错**，一次同步读 15 颗 4.8 ms。
+用仓库里新写的[网页调试台](tools/servo-web/)拖滑块、存姿态、跑序列，3D 模型跟着真机动，重心投影实时显示在不在脚底范围。
+上面这段是它从缩着**自己站起来**再坐下。**飞特路线的软件第一步走通了**，硬件方案没问题。
 
-**45 × 22 mm，2 层板**，四角 R2 圆角，两个对角 M2 孔；底层整片 GND。
-23 个网络全部连通，**DRC 0 违规**，每个芯片电源脚 2.3 mm 内都有去耦。
-仍然**没打样、没有实物验证**。
+`imu_to_dxl` 板首板已到：3.3 V 正常，J4/J5 接口封装要改，固件还没写 —— [设计说明与评审记录](hardware/imu_to_dxl/)。
 
-**[设计说明 · 评审要点 · 复查结果](hardware/imu_to_dxl/)**　·　
-[原理图 PDF](hardware/imu_to_dxl/imu_to_dxl-原理图.pdf)　·　
-[PCB PDF](hardware/imu_to_dxl/imu_to_dxl-PCB.pdf)　·　
-[3D STEP](hardware/imu_to_dxl/imu_to_dxl-PCB.step)　·　
-[接线表](hardware/imu_to_dxl/imu_to_dxl-接线表.md)　·　
-[嘉立创工程](hardware/imu_to_dxl/imu_to_dxl.eprj2)
+**[网页调试台](tools/servo-web/)**　·　
+**[调试记录](调试记录.md)**（零位、方向、站姿的坑）　·　
+[踩坑记录](踩坑记录.md#工具)（URT-2 先插 USB 再上电）　·　
+[飞特适配架构](software/飞特适配架构.md)
 
 </td>
 <td width="50%" valign="top">

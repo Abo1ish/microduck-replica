@@ -51,8 +51,8 @@ This repository covers two servo choices. **Mechanics, electronics and software 
 | **Printed parts** | [`print/`](print/) upstream STLs as-is | **8 mating parts remodelled** (HD-1910 horn protrudes, XL330's is recessed) — [MakerWorld](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428) / [3mf](https://github.com/fanhao375/microduck-replica-cad/tree/master/打印) |
 | **Editable CAD** | [CAD repo v1.1](https://github.com/fanhao375/microduck-replica-cad/releases/tag/v1.1) | [CAD repo v2.0](https://github.com/fanhao375/microduck-replica-cad/releases/tag/v2.0), files carry an `-FT` suffix |
 | **Electronics** | official HAT + [`imu_to_dxl`](hardware/imu_to_dxl/) | same; servo connectors are 2.0 mm (official 2.5), `imu_to_dxl` has J4/J5 at 2.0 |
-| **Software** | official runtime runs as-is | different bus protocol, swap the protocol module; policy retrained for HD-1910 — [training data checklist](docs/HD-1910训练前数据清单.md) |
-| **Status** | paper analysis + first prints | **full robot assembled** (2026-09-13), bus bring-up in progress |
+| **Software** | official runtime runs as-is | different bus protocol, swap the protocol module — [adaptation architecture](software/飞特适配架构.md) (zh); policy retrained for HD-1910 — [training data checklist](docs/HD-1910训练前数据清单.md) |
+| **Status** | paper analysis + first prints | **full robot assembled** (2026-09-13), **all 15 servos on the bus, stands up and sits down** (2026-09-18); zero pose and stance still being tuned |
 
 The selection argument is in [Actuator Selection](docs/actuator-selection.en.md). This repo's main line is Feetech; the original track is documented just as fully.
 
@@ -77,24 +77,20 @@ A WeChat group for people working on the same thing — build progress, pitfalls
 <tr>
 <td width="50%" valign="top">
 
-### 🔌 Electronics · `imu_to_dxl` PCB is done
+### 🔌 Electronics · all 15 servos powered up in the assembled duck, and it stands (2026-09-18)
 
-<a href="hardware/imu_to_dxl/"><img src="assets/hw/imu_to_dxl-PCB.png" alt="imu_to_dxl PCB top assembly"></a>
+<p align="center"><a href="assets/首次上电-2026-09-18.mp4"><img src="assets/首次上电-站起来.gif" alt="First power-on: standing up from the tucked pose (click for the 30 s video)" width="220"></a></p>
 
-The one board Pollen **did not** open-source — a third-party reconstruction, taken all
-the way from schematic to PCB. STM32G031F8P6 + LSM6DSV16X + half-duplex buffer, sitting
-on the servo bus as the **16th device**.
+First time the assembled duck was on the bus: URT-2 over USB, 7.4 V into V1, **all 15 HD-1910 online, 0 timeouts, 0 checksum errors**, one sync_read of 15 servos in 4.8 ms.
+Driven from the new [web servo console](tools/servo-web/) in this repo: sliders, saved poses, sequences, a 3D model that follows the real robot and a live centre-of-mass marker against the foot support.
+Above, it stands up from the tucked pose **by itself**, then sits back down. **First step of the Feetech software path works**; the hardware plan holds.
 
-**45 × 22 mm, 2 layers**, R2 rounded corners, two diagonal M2 holes, solid GND plane on
-the bottom. All 23 nets connected, **DRC clean**, every IC power pin has a 100nF within
-2.3 mm. Still **never fabricated or validated on hardware**.
+The first `imu_to_dxl` boards arrived: 3.3 V rail fine, J4/J5 connector footprint needs a fix, firmware not written yet — [design notes and reviews](hardware/imu_to_dxl/).
 
-**[Design notes · review points · audit](hardware/imu_to_dxl/)**　·　
-[Schematic PDF](hardware/imu_to_dxl/imu_to_dxl-原理图.pdf)　·　
-[PCB PDF](hardware/imu_to_dxl/imu_to_dxl-PCB.pdf)　·　
-[3D STEP](hardware/imu_to_dxl/imu_to_dxl-PCB.step)　·　
-[Netlist](hardware/imu_to_dxl/imu_to_dxl-接线表.md)　·　
-[EasyEDA project](hardware/imu_to_dxl/imu_to_dxl.eprj2)
+**[Web servo console](tools/servo-web/)**　·　
+**[Debug log](调试记录.md)** (zero pose, joint direction, stance pitfalls)　·　
+[Pitfalls](踩坑记录.md#工具) (URT-2: USB first, then servo power)　·　
+[Feetech adaptation architecture](software/飞特适配架构.md) (zh)
 
 </td>
 <td width="50%" valign="top">
