@@ -1,0 +1,4 @@
+# 本机状态，不进仓库
+calib/
+logs/
+poses/.trash/

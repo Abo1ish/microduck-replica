@@ -41,6 +41,7 @@ REGISTERS = {
     86: ("加速度倍数", 1, "出厂"),
 }
 STATUS_BITS = {0: "电压", 1: "磁编码", 2: "温度", 3: "电流", 5: "负载"}
+DUMP_END = max(REGISTERS) + 1   # 87：寄存器表最后一个地址 86
 
 
 def sign15(v):
@@ -57,10 +58,20 @@ class BusError(Exception):
     pass
 
 
+class BusTimeout(BusError):
+    """没应答或应答不完整。应答级别 0 时写指令本来就不回包，调用方自己决定算不算错。"""
+
+
+def hexs(b):
+    return " ".join(f"{x:02x}" for x in b)
+
+
 class FeetechBus:
-    def __init__(self, port, baud=1_000_000, timeout=0.02):
-        self.ser = serial.Serial(port, baud, timeout=timeout, write_timeout=0.1)
-        self.lock = threading.Lock()
+    def __init__(self, port, baud=1_000_000, timeout=0.02, ser=None):
+        # ser 给模拟器用（sim_bus.SimSerial），真机走串口
+        self.ser = ser if ser is not None else serial.Serial(port, baud, timeout=timeout, write_timeout=0.1)
+        # 串口互斥锁。别叫 self.lock：会盖住下面的 lock(sid)「加 EEPROM 锁」方法（2026-09-20 真机踩到）
+        self._io = threading.Lock()
         self.stats = {"tx": 0, "rx_ok": 0, "timeout": 0, "bad_checksum": 0, "bad_id": 0}
 
     def close(self):
@@ -90,31 +101,32 @@ class FeetechBus:
             hdr = (hdr + b)[-2:]
             if hdr == b"\xff\xff":
                 break
+        who = f"id {expect_id}" if expect_id is not None else "舵机"
         if hdr != b"\xff\xff":
             self.stats["timeout"] += 1
-            raise BusError("timeout")
+            raise BusTimeout(f"{who} 没应答（{self.ser.timeout * 3 * 1000:.0f} ms 内没收到帧头）")
         rest = self.ser.read(2)
         if len(rest) < 2:
             self.stats["timeout"] += 1
-            raise BusError("timeout(id/len)")
+            raise BusTimeout(f"{who} 应答断在 ID/长度（收到 ff ff {hexs(rest)}）")
         sid, length = rest[0], rest[1]
         body = self.ser.read(length)
         if len(body) < length:
             self.stats["timeout"] += 1
-            raise BusError("timeout(body)")
+            raise BusTimeout(f"{who} 应答不完整：长度 {length} 只收到 {len(body)}（ff ff {hexs(rest + body)}）")
         err, params, chk = body[0], body[1:-1], body[-1]
         if ((~(sid + length + err + sum(params))) & 0xFF) != chk:
             self.stats["bad_checksum"] += 1
-            raise BusError("bad checksum")
+            raise BusError(f"{who} 校验和不对（ff ff {hexs(rest + body)}）")
         if expect_id is not None and sid != expect_id:
             self.stats["bad_id"] += 1
-            raise BusError(f"expected id {expect_id}, got {sid}")
+            raise BusError(f"等 id {expect_id} 的应答，来的是 id {sid}（ff ff {hexs(rest + body)}）")
         self.stats["rx_ok"] += 1
         return sid, err, bytes(params)
 
     # ---- 指令 ----
     def ping(self, sid):
-        with self.lock:
+        with self._io:
             self._send(sid, PING)
             try:
                 _, err, _ = self._read_status(sid)
@@ -123,26 +135,24 @@ class FeetechBus:
                 return None
 
     def read(self, sid, addr, n):
-        with self.lock:
+        with self._io:
             self._send(sid, READ, bytes([addr, n]))
             _, err, params = self._read_status(sid)
             if len(params) != n:
-                raise BusError(f"short read {len(params)}/{n}")
+                raise BusError(f"id {sid} 读地址 {addr} 起 {n} 字节，只回了 {len(params)} 字节")
             return err, params
 
     def write(self, sid, addr, data, wait=True):
-        with self.lock:
+        with self._io:
             self._send(sid, WRITE, bytes([addr]) + bytes(data))
             if not wait or sid == BROADCAST:
                 return None
             try:
                 _, err, _ = self._read_status(sid)
                 return err
-            except BusError as e:
-                # 应答级别 0 时写指令不回包，不算错
-                if "timeout" in str(e):
-                    return None
-                raise
+            except BusTimeout:
+                # 应答级别 0 时写指令不回包，不算错；调用方拿到 None 自己判断
+                return None
 
     def write_u8(self, sid, addr, v):
         return self.write(sid, addr, [v & 0xFF])
@@ -162,13 +172,13 @@ class FeetechBus:
         for sid, data in id_values:
             assert len(data) == length
             params += bytes([sid]) + bytes(data)
-        with self.lock:
+        with self._io:
             self._send(BROADCAST, SYNC_WRITE, params)
 
     def sync_read(self, ids, addr, n):
         """返回 {id: (err, params) 或 None}，顺序按 ids。任何一颗超时不影响后面的。"""
         out = {}
-        with self.lock:
+        with self._io:
             self._send(BROADCAST, SYNC_READ, bytes([addr, n]) + bytes(ids))
             for sid in ids:
                 try:
@@ -180,8 +190,20 @@ class FeetechBus:
 
     def reboot(self, sid):
         """0x08，无应答，约 800 ms 后回来。"""
-        with self.lock:
+        with self._io:
             self._send(sid, REBOOT)
+
+    def calibrate_to(self, sid, value=None):
+        """0x0B 位置校准：把舵机「现在这个位置」的读数改成 value（不给就是中位 2048），偏移舵机自己算、自己存。
+        协议手册 4.9：STS ≥3.10、HLS ≥3.43 支持带参数。HD-1910（固件 3.46）不认扭矩开关写 128，只能走这个。
+        返回应答里的状态字节；没应答返回 None。"""
+        params = b"" if value is None else struct.pack("<H", value & 0xFFFF)
+        with self._io:
+            self._send(sid, CALIBRATE, params)
+            try:
+                return self._read_status(sid)[1]
+            except BusTimeout:
+                return None
 
     def unlock(self, sid):
         return self.write_u8(sid, 55, 0)
@@ -212,17 +234,17 @@ class FeetechBus:
         return {sid: (self._decode_state(*v) if v else None) for sid, v in raw.items()}
 
     def dump(self, sid):
-        """0–90 全读，按 REGISTERS 解码。"""
+        """0–86 全读，按 REGISTERS 解码。"""
         raw = b""
-        for start in range(0, 91, 10):
-            n = min(10, 91 - start)
+        for start in range(0, DUMP_END, 10):          # HD-1910 的表到 86 为止，读过头舵机只回剩下的字节
+            n = min(10, DUMP_END - start)
             for attempt in range(4):
                 try:
                     raw += self.read(sid, start, n)[1]
                     break
                 except BusError as e:
                     if attempt == 3:
-                        raise BusError(f"addr {start}: {e}")
+                        raise BusError(f"导出到地址 {start}：{e}")
                     time.sleep(0.01)
         rows = []
         for addr in sorted(REGISTERS):
@@ -233,6 +255,8 @@ class FeetechBus:
 
     def set_id(self, old, new):
         self.unlock(old)
-        self.write_u8(old, 5, new)
+        # 改 ID 这一包的应答可能用新 ID 回，也可能用旧 ID 回，不等它；下一包发之前会清接收缓冲
+        self.write(old, 5, [new & 0xFF], wait=False)
+        time.sleep(0.02)
         self.lock(new)
         return self.ping(new) is not None

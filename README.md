@@ -98,12 +98,43 @@ MJCF 里包含了完整的运动学树：每个零件挂在谁身上、相对位
 [打印件清单](print/)
 </td>
 </tr>
-</table>
+<tr>
+<td width="50%" valign="top">
 
-> **原理图求评审** —— 特别想听这几处的意见：半双工缓冲的使能逻辑（`2OE` 接常高、
-> 发送时有回显 vs 也接 DE、发送时 RX 悬空）；J1/J2 直通的铜皮宽度；
-> 不上晶振（TSSOP-20 没引出 `OSC_OUT`，HSI16 跑 1 Mbps 余量够不够）。
-> 发现问题请开 [issue](https://github.com/fanhao375/microduck-replica/issues)，或者在上面的群里说。
+### 💻 软件 · 网页调试台，串口直连 15 颗舵机
+
+<p align="center"><a href="tools/servo-web/"><img src="assets/servo-web.png" alt="网页调试台：滑块、3D 鸭子、重心投影" width="420"></a></p>
+
+浏览器拖滑块让舵机动，3D 鸭子跟着转，重心投影实时算在不在脚底范围。
+存姿态、跑序列、一键校准零位、导出全部寄存器、时序测试，装机和台架验收都用它。
+
+后端不依赖飞特 SDK，[`feetech.py`](tools/servo-web/feetech.py) 按 2026 版协议手册直接收发包，一百多行。
+配套一个**协议级舵机模拟器**，不接硬件就能把校准、改 ID、写寄存器跑一遍自检。
+
+接官方运行时的 `FeetechIo`（`RobotIo` 接缝，rustypot 协议 v1）已经写完，等零位校准做完上板。
+
+**[网页调试台](tools/servo-web/)**　·
+**[飞特适配架构](software/飞特适配架构.md)**　·
+[飞特官方资料](docs/飞特资料/)（协议、内存表）
+
+</td>
+<td width="50%" valign="top">
+
+### 🧠 算法 · 待更新
+
+走路策略还没开始。官方是 [microduck_rl](https://github.com/apirrone/microduck_rl) 在 MuJoCo 里训好导出 ONNX，
+运行时按 50 Hz 推理。飞特版要先把**零位和关节方向**标定准，策略才有意义 —— 现在卡在这一步。
+
+HD-1910 跟 XL330 的力矩、减速比、阻尼都不一样，官方预训练的策略大概率要重训。
+重训要的参数（力矩常数、速度限、PID、摩擦）整理在[训练前数据清单](docs/HD-1910训练前数据清单.md)里，
+能测的已经测了，不能测的标了待办。
+
+**[HD-1910 训练前数据清单](docs/HD-1910训练前数据清单.md)**　·
+[执行器选型](docs/执行器选型.md)
+
+</td>
+</tr>
+</table>
 
 ---
 

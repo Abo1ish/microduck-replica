@@ -115,13 +115,50 @@ horns were remodelled and reprinted. The editable SolidWorks drawings have an FT
 [Printable parts](print/)
 </td>
 </tr>
-</table>
+<tr>
+<td width="50%" valign="top">
 
-> **Schematic review wanted** — feedback especially welcome on: the half-duplex buffer
-> enable logic (`2OE` tied high, so the MCU hears its own echo, vs. also driven by DE,
-> which lets RX float while transmitting); copper width for the J1/J2 pass-through;
-> and running 1 Mbps off HSI16 with no crystal (TSSOP-20 does not bring out `OSC_OUT`).
-> Please open an [issue](https://github.com/fanhao375/microduck-replica/issues) if you spot something.
+### 💻 Software · web console driving 15 servos over the serial bus
+
+<p align="center"><a href="tools/servo-web/"><img src="assets/servo-web.png" alt="Web console: sliders, 3D duck, CoM projection" width="420"></a></p>
+
+Drag a slider in the browser and the servo moves; the 3D duck follows, and the centre-of-mass
+projection shows live whether it still falls inside the foot support polygon. Save poses, run
+sequences, calibrate the zero in one click, dump every register, measure bus timing — this is the
+tool used for assembly and bench acceptance.
+
+The backend does not use the Feetech SDK: [`feetech.py`](tools/servo-web/feetech.py) speaks the
+2026 protocol manual directly in about a hundred lines. It ships with a **packet-level servo
+simulator**, so calibration, ID changes and register writes are self-tested with no hardware attached.
+
+`FeetechIo` for the official runtime (the `RobotIo` seam, rustypot protocol v1) is written and
+waiting on the zero calibration before it goes on the board.
+
+**[Web console](tools/servo-web/)**　·　
+**[Feetech port architecture](software/飞特适配架构.md)**　(Chinese)　·　
+[Feetech official docs](docs/飞特资料/)
+
+</td>
+<td width="50%" valign="top">
+
+### 🧠 Algorithms · to be updated
+
+The walking policy has not been started. Upstream trains in MuJoCo with
+[microduck_rl](https://github.com/apirrone/microduck_rl), exports ONNX, and the runtime infers at
+50 Hz. On the Feetech build the **zero position and joint directions** have to be calibrated first,
+or the policy means nothing — that is exactly where this build is stuck right now.
+
+HD-1910 differs from XL330 in torque, gear ratio and damping, so the upstream pretrained policy will
+most likely need retraining. The parameters that retraining needs (torque constant, speed limit, PID,
+friction) are collected in the [pre-training data checklist](docs/HD-1910训练前数据清单.md): measured
+where measurable, flagged as to-do where not.
+
+**[HD-1910 pre-training data checklist](docs/HD-1910训练前数据清单.md)**　·　
+[Actuator selection](docs/执行器选型.md)
+
+</td>
+</tr>
+</table>
 
 ---
 

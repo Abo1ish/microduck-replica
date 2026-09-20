@@ -14,7 +14,9 @@ import contextlib
 import json
 import os
 import struct
+import threading
 import time
+import traceback
 
 import uvicorn
 from starlette.applications import Starlette
@@ -25,6 +27,10 @@ from starlette.websockets import WebSocketDisconnect
 import feetech
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# 调试台版本。改了前端或后端就加一：index.html 里的 PAGE_VERSION 要跟这里一样，
+# 页面连上后会比对，不一样就提示"页面是旧的，Ctrl+F5"。改动记在 README 的「版本」一节。
+VERSION = "0.8.0"
 DEFAULT_IDS = "20-24,30-34,10-14"
 JOINT_NAMES = {
     20: "left_hip_yaw", 21: "left_hip_roll", 22: "left_hip_pitch", 23: "left_knee", 24: "left_ankle",
@@ -54,6 +60,9 @@ class FakeBus:
         self.pos = {i: 2048 for i in ids}
         self.goal = {i: 2048 for i in ids}
         self.torque = {i: 0 for i in ids}
+        self.offset = {i: 0 for i in ids}
+        self.locked = {i: 1 for i in ids}   # 出厂锁着
+        self.regs = {}                      # 其它寄存器随便写随便读，(id, 地址) -> 值
         self.stats = {"tx": 0, "rx_ok": 0, "timeout": 0, "bad_checksum": 0, "bad_id": 0}
 
     def ping(self, sid):
@@ -75,14 +84,34 @@ class FakeBus:
         return out
 
     def write_u16(self, sid, addr, v):
+        self.regs[(sid, addr)] = v & 0xFFFF
         if addr == 42:
             self.goal[sid] = v
+        if addr == 31:
+            self.pos[sid] += v - self.offset[sid]
+            self.offset[sid] = v
         return 0
 
     def write_u8(self, sid, addr, v):
-        if addr == 40:
+        if addr == 55:
+            self.locked[sid] = 1 if v else 0
+        elif addr != 40:
+            self.regs[(sid, addr)] = v & 0xFF
+        if addr == 40 and v != 128:          # 写 128 跟 HD-1910 一样：回成功，什么都不做
             self.torque[sid] = 1 if v == 1 else 0
         return 0
+
+    def calibrate_to(self, sid, value=None):
+        value = 2048 if value is None else value
+        self.offset[sid] += value - self.pos[sid]
+        self.pos[sid] = value
+        return 0
+
+    def read_u8(self, sid, addr):
+        return {40: self.torque[sid], 55: self.locked[sid]}.get(addr, self.regs.get((sid, addr), 0))
+
+    def read_u16(self, sid, addr):
+        return {31: self.offset[sid], 56: self.pos[sid], 42: self.goal[sid]}.get(addr, self.regs.get((sid, addr), 0))
 
     def sync_write(self, addr, length, id_values):
         for sid, data in id_values:
@@ -97,22 +126,26 @@ class FakeBus:
         return {i: (0, bytes(n)) if i in self.pos else None for i in ids}
 
     def dump(self, sid):
-        raw = [0] * 91
-        raw[5], raw[8], raw[21], raw[22], raw[33], raw[55] = sid, 1, 32, 32, 4, 1
+        raw = [0] * feetech.DUMP_END
+        raw[5], raw[8], raw[21], raw[22], raw[33], raw[55] = sid, 1, 32, 32, 4, self.locked.get(sid, 1)
         rows = [{"addr": a, "name": feetech.REGISTERS[a][0], "area": feetech.REGISTERS[a][2],
                  "size": feetech.REGISTERS[a][1], "value": raw[a]} for a in sorted(feetech.REGISTERS)]
         return {"rows": rows, "raw": raw}
 
     def read(self, sid, addr, n):
+        if addr == 0 and n == 5:
+            return 0, bytes([3, 10, 0, 3, 11])
         return 0, bytes(n)
 
     def reboot(self, sid):
         pass
 
     def unlock(self, sid):
+        self.locked[sid] = 0
         return 0
 
     def lock(self, sid):
+        self.locked[sid] = 1
         return 0
 
     def set_id(self, old, new):
@@ -129,7 +162,12 @@ BUS = None
 IDS = []
 PRESENT = []
 CLIENTS = set()
-LOG = []
+LOG = []           # [{"n": 序号, "t": "时:分:秒", "cat": 分类, "level": info/warn/error, "msg": 正文}]
+LOG_N = 0
+LOG_DIR = os.path.join(HERE, "logs")
+LOG_CATS = ["系统", "总线", "运动", "校准", "寄存器", "姿态", "方向"]   # 页面自己还有一类「页面」
+LEVEL_TAG = {"info": "", "warn": "[警告]", "error": "[错误]", "debug": "[调试]"}
+_log_io = threading.Lock()
 STREAM_HZ = 10
 SPEED_UNIT = 1.0   # 速度寄存器 46 一个单位 = 多少步/秒：相位 18 BIT2=1 → 1（0.0146 rpm），BIT2=0 → 50（0.732 rpm）
 MAX_SPEED_REG = 3000   # "不限速"写多少：相位 BIT3=1 时 0 = 最快；BIT3=0 时 0 = 停，得写个大数（HD-1910 满速约 3000 步/秒）
@@ -158,15 +196,46 @@ def read_phase():
         release_speed(PRESENT)
         log("已把全部舵机速度上限放开、加速度设最大")
     except Exception as e:
-        log(f"读相位失败，速度单位按 1 步/秒：{e}")
+        log(f"读相位失败，速度单位按 1 步/秒：{type(e).__name__}: {e}", "系统", "warn", exc=True)
 
 
-def log(msg):
-    line = f"{time.strftime('%H:%M:%S')} {msg}"
-    LOG.append(line)
-    del LOG[:-200]
-    print(line, flush=True)
+def log_path():
+    return os.path.join(LOG_DIR, f"servo-web-{time.strftime('%Y-%m-%d')}.log")
+
+
+def log(msg, cat="系统", level="info", exc=False):
+    """cat：系统 / 总线 / 运动 / 校准 / 寄存器 / 姿态 / 方向。level：info / warn / error / debug。
+    每行都追加到 logs/servo-web-日期.log（debug 只进文件，不上页面）；exc=True 把当前异常的 traceback 一起写进文件。
+    出问题时这个文件就是现场，发过来或者让 Claude 直接读。"""
+    global LOG_N
+    t = time.strftime("%H:%M:%S")
+    line = f"{t} [{cat}]{LEVEL_TAG.get(level, '')} {msg}"
+    tb = traceback.format_exc() if exc else ""
+    with _log_io:
+        try:
+            os.makedirs(LOG_DIR, exist_ok=True)
+            with open(log_path(), "a", encoding="utf-8") as f:
+                f.write(line + "\n" + tb)
+        except OSError:
+            pass
+        if level != "debug":
+            LOG_N += 1
+            LOG.append({"n": LOG_N, "t": t, "cat": cat, "level": level, "msg": msg})
+            del LOG[:-400]
+    print(line + ("\n" + tb.rstrip() if tb else ""), flush=True)
     return line
+
+
+def _ack(err):
+    """写指令的应答：0 = 正常；None = 没回包（应答级别 0，或者丢了）；别的 = 舵机状态位有报警。"""
+    return "✓" if err == 0 else ("（没应答）" if err is None else f"（状态 0x{err:02X}）")
+
+
+def fmt_off(v):
+    """偏移寄存器 31：HD-1910 第 15 位是符号位，34279 = -1511。"""
+    if v is None:
+        return "?"
+    return f"{feetech.sign15(v)}({v})" if v & 0x8000 else str(v)
 
 
 def is_fake():
@@ -174,7 +243,9 @@ def is_fake():
 
 
 async def index(request):
-    return FileResponse(os.path.join(HERE, "index.html"))
+    # 不让浏览器缓存页面：改了前端以后，缓存里的旧页面会用旧逻辑跑，现象像"改了没生效"
+    return FileResponse(os.path.join(HERE, "index.html"),
+                        headers={"Cache-Control": "no-store, max-age=0"})
 
 
 async def model_file(request):
@@ -188,6 +259,263 @@ async def model_file(request):
 
 
 POSES_DIR = os.path.join(HERE, "poses")
+DIRS_FILE = os.path.join(HERE, "directions.json")
+
+
+def load_dirs():
+    """每颗舵机的方向 +1 / -1。文件里没写的按 +1。"""
+    try:
+        with open(DIRS_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+        return {int(k): (-1 if v == -1 else 1) for k, v in raw.items() if not k.startswith("_")}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        log(f"directions.json 读不了，全部按 +1：{e}", "方向", "warn")
+        return {}
+
+
+def save_dirs(dirs):
+    note = ""
+    try:
+        with open(DIRS_FILE, encoding="utf-8") as f:
+            note = json.load(f).get("_note", "")
+    except Exception:
+        pass
+    out = {"_note": note} if note else {}
+    for i in IDS:
+        out[str(i)] = dirs.get(i, 1)
+    with open(DIRS_FILE, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
+
+
+CALIB_DIR = os.path.join(HERE, "calib")
+
+
+def backup_calibration(ids):
+    """中位校准前把每颗的偏移（寄存器 31）、读数、扭矩、锁标志、固件版本记下来，撤销用。"""
+    rows = {}
+    for i in ids:
+        try:
+            ver = BUS.read(i, 0, 5)[1]
+            rows[str(i)] = {"offset": BUS.read_u16(i, 31), "pos": feetech.sign15(BUS.read_u16(i, 56)),
+                            "torque": BUS.read_u8(i, 40), "lock": BUS.read_u8(i, 55), "firmware": f"{ver[0]}.{ver[1]}"}
+        except Exception as e:
+            rows[str(i)] = {"error": f"{type(e).__name__}: {e}"}
+            log(f"#{i} 备份时读不到：{type(e).__name__}: {e}", "校准", "warn", exc=True)
+    os.makedirs(CALIB_DIR, exist_ok=True)
+    now = time.time()                                  # 带毫秒：同一秒点两次也不撞名，字典序 = 时间顺序
+    fn = f"eeprom-{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}{int(now * 1000) % 1000:03d}.json"
+    with open(os.path.join(CALIB_DIR, fn), "w", encoding="utf-8") as f:
+        json.dump({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "servos": rows}, f, ensure_ascii=False, indent=1)
+    return fn, rows
+
+
+def shift_saved_poses(deltas, sign=1, only=None, exclude=()):
+    """重新校准后，同一个物理姿势的读数变了 delta。把 poses/ 里存的原始读数跟着挪，免得发旧数字摆错。
+    only：只挪这些文件（撤销时用：只把当次挪过的挪回来，之后新存的姿态不碰）；exclude：不挪的（当基准的那个姿态）。
+    序列文件只存"相对某个姿态几度"，不用挪。返回挪过的文件名列表。"""
+    changed = []
+    if not os.path.isdir(POSES_DIR) or not any(deltas.values()):
+        return changed
+    for fn in sorted(os.listdir(POSES_DIR)):
+        if not fn.endswith(".json") or fn in exclude or (only is not None and fn not in only):
+            continue
+        p = os.path.join(POSES_DIR, fn)
+        with open(p, encoding="utf-8") as f:
+            pose = json.load(f)
+        rows = pose.get("rows")
+        if not rows:
+            continue
+        hit = False
+        for r in rows:
+            d = deltas.get(str(r.get("id")))
+            if d:
+                r["pos"] = int(r["pos"]) + sign * int(d)
+                r["deg"] = round((r["pos"] - 2048) * 360 / 4096, 1)
+                hit = True
+        if hit:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(pose, f, ensure_ascii=False, indent=1)
+            changed.append(fn)
+    return changed
+
+
+CALIB_TOLERANCE = 2    # 0x0B 是舵机自己把当前位置记成目标值，校完读数应该正好是目标，±2 步算读数抖动
+
+
+def calibrate_one(i, before, target=2048):
+    """一颗舵机的位置校准：让它「现在这个位置」的读数变成 target（默认 2048 = 官方零位）。
+
+    用 0x0B 位置校准指令，带参数 = 校成指定值。HD-1910（固件 3.46）不认扭矩开关写 128：
+    2026-09-20 实测 4 轮，解锁、扭矩关着写 128，15 颗偏移一个都没变；协议手册里 HLS ≥3.43 也写着不支持 128。
+    顺序：解锁 → 读当前位置 → 关扭矩 → 0x0B → 读回 → 对上了才把目标改成 target → 扭矩复原 → 加锁。
+    关扭矩到恢复只有几毫秒、中间不 sleep：0.7.x 关着扭矩等了 30–130 ms，颈部被重力压下去 80 步，校的就不是摆好的位置。
+    读回没对上就把目标写成读回值（原地不动），绝不拿 target 去拉关节。出错在 finally 里加锁。
+    返回 {"ok", "pre": 校准前读数, "pos": 校准后读数, "target", "why"}。"""
+    was_on = before.get("torque") == 1
+    old_off = before.get("offset")
+    trail, step, ok, pre, pos, off, why = [], "解锁", False, None, None, None, ""
+    try:
+        trail.append("解锁" + _ack(BUS.unlock(i)))
+        step = "读当前位置"
+        pre = feetech.sign15(BUS.read_u16(i, 56))     # 紧挨着校准再读一次：备份那次可能是几百毫秒前
+        if was_on:
+            step = "关扭矩"
+            trail.append("关扭矩" + _ack(BUS.write_u8(i, 40, 0)))
+        step = "0x0B 位置校准"
+        trail.append(f"0x0B→{target}" + _ack(BUS.calibrate_to(i, target)))
+        step = "读回位置"
+        for _ in range(3):                            # 不 sleep：每次读本身约 1 ms
+            pos = feetech.sign15(BUS.read_u16(i, 56))
+            if abs(pos - target) <= CALIB_TOLERANCE:
+                break
+        ok = abs(pos - target) <= CALIB_TOLERANCE
+        step = "写目标"
+        goal = target if ok else pos
+        trail.append(f"目标{goal}" + _ack(BUS.write_u16(i, 42, goal & 0xFFFF)))
+        if was_on:
+            step = "开扭矩"
+            trail.append("开扭矩" + _ack(BUS.write_u8(i, 40, 1)))
+        step = "读偏移"
+        off = BUS.read_u16(i, 31)
+        if not ok:
+            why = (f"0x0B 后读数 {pos}，不是 {target}（偏移"
+                   + ("没变，舵机没执行校准" if off == old_off else f"变了 {fmt_off(old_off)}→{fmt_off(off)}，但读数对不上") + "）")
+    except Exception as e:
+        ok = False
+        why = f"卡在「{step}」：{type(e).__name__}: {e}"
+        trail.append("✗" + why)
+        log(f"#{i} {why}（扭矩{'没恢复' if was_on else '本来就关着'}；0x0B 之后出错的话偏移可能已经改了，导出寄存器看 31）",
+            "校准", "error", exc=True)
+    finally:
+        try:
+            BUS.lock(i)
+            locked = BUS.read_u8(i, 55)
+            trail.append("加锁✓" if locked == 1 else f"加锁后锁标志读回 {locked}")
+        except Exception as e:
+            trail.append(f"✗加锁：{type(e).__name__}: {e}")
+            log(f"#{i} 加锁失败，舵机可能还是解锁状态：{type(e).__name__}: {e}", "校准", "error", exc=True)
+    head = (f"#{i} 读数 {pre if pre is not None else '?'}→{pos if pos is not None else '?'}（目标 {target}）"
+            f" 偏移 {fmt_off(old_off)}→{fmt_off(off)}"
+            + ("" if before.get("lock") == 1 else f" 校准前锁标志 {before.get('lock')}")
+            + f" 扭矩原来{'开' if was_on else '关'}")
+    log(head + " · " + " ".join(trail) + ("" if ok else f" · 失败：{why}"), "校准", "info" if ok else "warn")
+    return {"ok": ok, "pre": pre, "pos": pos, "target": target, "why": why}
+
+
+def read_pose_file(fn):
+    if not fn or os.path.basename(fn) != fn or not fn.endswith(".json"):
+        raise ValueError(f"不认识的姿态文件 {fn!r}")
+    with open(os.path.join(POSES_DIR, fn), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def calibrate_mid_all(ids, ref=None):
+    """把选中舵机「现在的位置」校准成目标读数，一颗一颗来：每颗只关几毫秒扭矩，别的舵机照样撑着。
+
+    ref=None：目标都是 2048，鸭子要摆成官方零位（腿伸直、脚板垂直、头平视、嘴闭上）。
+    ref=姿态文件名：目标是那个姿态里存的读数。比如「缩」：鸭子自己能缩着放稳，靠机械接触定位，比手扶着摆直准。
+    零位始终是官方的 2048，姿态只当「校准夹具」用，所以官方代码、策略、别的姿态都不用加 offset。
+
+    存的姿态挪不挪：校到 2048 是换了零位，之前存的姿态是旧读数，要跟着挪；
+    按姿态校准是把舵机拉回基准姿态那套读数，别的姿态跟基准是同一套读数存的，不挪（舵机换过、舵盘重装过，校回来它们就又对了）。"""
+    name = "零位 2048"
+    targets = {i: 2048 for i in ids}
+    if ref:
+        pose = read_pose_file(ref)
+        name = f"姿态「{pose.get('name', ref)}」（{ref}）"
+        targets = {int(r["id"]): int(r["pos"]) for r in pose.get("rows", [])}
+    log(f"开始校准 {len(ids)} 颗到{name}：{ids}", "校准")
+    fn, before = backup_calibration(ids)
+    log(f"原来的偏移、读数、扭矩、锁标志备份在 calib/{fn}", "校准")
+    ok, bad, deltas = [], {}, {}
+    for i in ids:
+        b = before.get(str(i), {})
+        if i not in targets:
+            bad[i] = "参考姿态里没有这颗"
+            continue
+        if "offset" not in b:
+            bad[i] = "备份时读不到，没动它"
+            continue
+        r = calibrate_one(i, b, targets[i])
+        if r["ok"]:
+            ok.append(i)
+            deltas[str(i)] = r["pos"] - r["pre"]       # 同一个物理位置，读数从 pre 变成了 pos
+        else:
+            bad[i] = r["why"]
+    moved = [] if ref else shift_saved_poses(deltas)
+    bp = os.path.join(CALIB_DIR, fn)
+    with open(bp, encoding="utf-8") as f:
+        rec = json.load(f)
+    rec.update({"ref": ref, "targets": {str(k): v for k, v in targets.items() if k in ids},
+                "deltas": deltas, "shifted": moved, "bad": {str(k): v for k, v in bad.items()}})
+    with open(bp, "w", encoding="utf-8") as f:
+        json.dump(rec, f, ensure_ascii=False, indent=1)
+    if moved:
+        log(f"存的姿态换算到新零点：{moved}（" + " ".join(f"#{k}{v:+d}" for k, v in deltas.items() if v) + "）", "姿态")
+    log(f"校准完（{name}）：成功 {len(ok)} 颗 {ok}" + (f"；失败 {len(bad)} 颗 {sorted(bad)}，原因见上面每颗那行" if bad else "")
+        + f"；备份 calib/{fn}", "校准", "warn" if bad else "info")
+    return {"type": "calib_result", "ok": ok, "bad": {str(k): v for k, v in bad.items()}, "backup": fn}
+
+
+def undo_calibration():
+    """把最近一次备份里的偏移写回去（关扭矩 → 解锁 → 写 31 → 加锁），目标位置改成当前读数，扭矩状态照旧。"""
+    files = sorted(f for f in os.listdir(CALIB_DIR) if f.startswith("eeprom-")) if os.path.isdir(CALIB_DIR) else []
+    if not files:
+        log("没有可撤销的中位校准", "校准", "warn")
+        return {"type": "calib_result", "ok": [], "bad": {}, "backup": None}
+    fn = files[-1]
+    with open(os.path.join(CALIB_DIR, fn), encoding="utf-8") as f:
+        rec = json.load(f)
+    log(f"开始撤销：把 calib/{fn}（{rec.get('time', '?')}）里的偏移写回去", "校准")
+    ok, bad = [], {}
+    for k, row in rec["servos"].items():
+        i = int(k)
+        if "offset" not in row:
+            log(f"#{i} 备份里没有偏移（{row.get('error', '?')}），跳过", "校准", "warn")
+            continue
+        trail, step, on = [], "读当前状态", False
+        try:
+            on = BUS.read_u8(i, 40) == 1
+            off0, p0 = BUS.read_u16(i, 31), feetech.sign15(BUS.read_u16(i, 56))
+            if on:
+                step = "关扭矩"
+                trail.append("关扭矩" + _ack(BUS.write_u8(i, 40, 0)))
+            step = "解锁"
+            trail.append("解锁" + _ack(BUS.unlock(i)))
+            step = "写偏移"
+            trail.append(f"写偏移{fmt_off(row['offset'])}" + _ack(BUS.write_u16(i, 31, row["offset"])))
+            time.sleep(0.02)
+            step = "读回"
+            off1, p1 = BUS.read_u16(i, 31), feetech.sign15(BUS.read_u16(i, 56))
+            step = "写目标"
+            trail.append(f"目标{p1}" + _ack(BUS.write_u16(i, 42, p1 & 0xFFFF)))
+            if on:
+                step = "开扭矩"
+                trail.append("开扭矩" + _ack(BUS.write_u8(i, 40, 1)))
+            good = off1 == row["offset"]
+            (ok.append(i) if good else bad.__setitem__(i, f"偏移写了 {row['offset']} 读回 {off1}"))
+            log(f"#{i} 偏移 {fmt_off(off0)}→{fmt_off(off1)}（备份值 {fmt_off(row['offset'])}） 读数 {p0}→{p1} · " + " ".join(trail),
+                "校准", "info" if good else "warn")
+        except Exception as e:
+            bad[i] = f"卡在「{step}」：{type(e).__name__}: {e}"
+            log(f"#{i} 撤销{bad[i]}（扭矩{'没恢复' if on else '本来就关着'}）", "校准", "error", exc=True)
+        finally:
+            try:
+                BUS.lock(i)
+            except Exception as e:
+                log(f"#{i} 加锁失败：{type(e).__name__}: {e}", "校准", "error", exc=True)
+    if "shifted" in rec:
+        moved = shift_saved_poses(rec.get("deltas", {}), sign=-1, only=set(rec["shifted"]))
+        if moved:
+            log(f"存的姿态换算回原来的零点：{moved}；这次校准之后新存的姿态没动", "姿态")
+    elif any(rec.get("deltas", {}).values()):
+        log("这份备份是 0.8.0 以前的，没记当时挪了哪些姿态，姿态不自动挪回，需要的话手动核对", "姿态", "warn")
+    os.rename(os.path.join(CALIB_DIR, fn), os.path.join(CALIB_DIR, "undone-" + fn))
+    log(f"撤销完（{fn} 已改名 undone-{fn}）：{len(ok)} 颗偏移写回" + (f"；失败 {sorted(bad)}" if bad else ""),
+        "校准", "warn" if bad else "info")
+    return {"type": "calib_result", "ok": ok, "bad": {str(k): v for k, v in bad.items()}, "backup": fn}
 
 
 def list_poses():
@@ -202,7 +530,7 @@ def list_poses():
                                 "goals": {r["id"]: r["pos"] for r in p.get("rows", [])},
                                 "steps": p.get("steps")})
                 except Exception as e:
-                    log(f"pose {fn} 读不了: {e}")
+                    log(f"姿态文件 {fn} 读不了：{type(e).__name__}: {e}", "姿态", "warn")
     return out
 
 
@@ -215,8 +543,30 @@ def save_pose(name):
     fn = f"{safe}-{time.strftime('%Y-%m-%d')}.json"
     with open(os.path.join(POSES_DIR, fn), "w", encoding="utf-8") as f:
         json.dump({"name": safe, "time": time.strftime("%Y-%m-%d %H:%M"), "rows": rows}, f, ensure_ascii=False, indent=1)
-    log(f"姿态已存 poses/{fn}（{len(rows)} 颗）")
+    missing = [i for i, v in st.items() if not v]
+    log(f"姿态已存 poses/{fn}（{len(rows)} 颗）" + (f"；读不到 {missing}，没存进去" if missing else ""), "姿态", "warn" if missing else "info")
     return fn
+
+
+def delete_pose(fn):
+    """不真删：挪进 poses/.trash/，文件名前加时间，删错了从那里拿回来。只认 poses/ 里的 .json。"""
+    if not fn or os.path.basename(fn) != fn or not fn.endswith(".json"):
+        raise ValueError(f"不认识的姿态文件 {fn!r}")
+    src = os.path.join(POSES_DIR, fn)
+    if not os.path.isfile(src):
+        raise ValueError(f"poses/ 里没有 {fn}")
+    trash = os.path.join(POSES_DIR, ".trash")
+    os.makedirs(trash, exist_ok=True)
+    dst = os.path.join(trash, f"{time.strftime('%Y%m%d-%H%M%S')}-{fn}")
+    os.replace(src, dst)
+    log(f"姿态已删除：{fn}（挪到 poses/.trash/，要找回就挪回来）", "姿态")
+
+
+async def logfile(request):
+    path = log_path()
+    if not os.path.exists(path):
+        return JSONResponse({"error": "今天还没有日志"}, status_code=404)
+    return FileResponse(path, media_type="text/plain; charset=utf-8", headers={"Cache-Control": "no-store"})
 
 
 async def poses(request):
@@ -224,7 +574,7 @@ async def poses(request):
 
 
 async def info(request):
-    return JSONResponse({"ids": IDS, "present": PRESENT, "names": JOINT_NAMES, "fake": is_fake(),
+    return JSONResponse({"version": VERSION, "ids": IDS, "present": PRESENT, "names": JOINT_NAMES, "fake": is_fake(),
                          "stats": BUS.stats, "log": LOG[-50:]})
 
 
@@ -232,7 +582,9 @@ def do_scan(ids):
     global PRESENT
     found = [i for i in ids if BUS.ping(i) is not None]
     PRESENT = found
-    log(f"scan {ids[0]}..{ids[-1]}: 在线 {found}")
+    lost = [i for i in ids if i not in found] if len(ids) <= 32 else []
+    log(f"扫描 {ids[0]}..{ids[-1]}：在线 {len(found)} 颗 {found}" + (f"；不在线 {lost}" if lost else ""),
+        "总线", "warn" if lost else "info")
     return found
 
 
@@ -249,7 +601,7 @@ def do_timing(n=200):
     res = {"n": n, "ids": len(ids), "min_ms": round(times[0], 2), "avg_ms": round(sum(times) / n, 2),
            "p99_ms": round(times[max(0, int(n * 0.99) - 1)], 2), "max_ms": round(times[-1], 2), "fails": fails,
            "stats": dict(BUS.stats)}
-    log(f"timing: {res}")
+    log(f"时序测试：{res}", "总线", "warn" if fails else "info")
     return res
 
 
@@ -302,7 +654,7 @@ def handle(cmd):
         BUS.sync_write(41, 7, items)
         for i in want:
             STREAM_LAST.pop(i, None)
-        log(f"profile {seconds}s acc={acc} 速度单位={SPEED_UNIT:g}步/s → " + " ".join(f"{i}:{want[i]}@{speeds[i]}" for i in want))
+        log(f"平滑 {seconds}s acc={acc} 速度单位={SPEED_UNIT:g}步/s → " + " ".join(f"{i}:{want[i]}@{speeds[i]}" for i in want), "运动")
     elif op == "release":
         ids = [int(i) for i in cmd.get("ids", [])] or (PRESENT or IDS)
         release_speed(ids)
@@ -318,7 +670,7 @@ def handle(cmd):
             if not want:
                 break
         if want:
-            log(f"goals_verify: {len(want)} 颗 4 轮后目标仍没写进去 {sorted(want)}")
+            log(f"目标回读：{len(want)} 颗 4 轮后目标仍没写进去 {sorted(want)}", "运动", "warn")
         return {"type": "goals_verify", "missing": sorted(want), "attempts": attempt + 1}
     elif op == "torque":
         if cmd.get("ids"):
@@ -326,7 +678,7 @@ def handle(cmd):
         else:
             ids = [int(cmd["id"])] if cmd.get("id") is not None else (PRESENT or IDS)
         BUS.sync_write(40, 1, [(i, bytes([int(cmd["on"])])) for i in ids])
-        log(f"torque {int(cmd['on'])} -> {ids}")
+        log(f"扭矩{'开' if int(cmd['on']) else '关'} → {ids}", "运动")
     elif op == "scan":
         return {"type": "scan", "present": do_scan(parse_ids(cmd.get("ids") or DEFAULT_IDS))}
     elif op == "scan_all":
@@ -335,75 +687,137 @@ def handle(cmd):
         sid = int(cmd["id"])
         d = BUS.dump(sid)
         r = d["raw"]
-        log(f"dump id {sid}: 固件 {r[0]}.{r[1]} 舵机 {r[3]}.{r[4]} END={r[2]} 模式={r[33]} 相位={r[18]} "
-            f"P/D/I={r[21]}/{r[22]}/{r[23]} 锁={r[55]} 应答级别={r[8]}")
+        log(f"导出 #{sid}：固件 {r[0]}.{r[1]} 舵机 {r[3]}.{r[4]} END={r[2]} 模式={r[33]} 相位={r[18]} "
+            f"P/D/I={r[21]}/{r[22]}/{r[23]} 偏移={fmt_off(r[31] | r[32] << 8)} 扭矩={r[40]} 锁={r[55]} 应答级别={r[8]}", "寄存器")
         return {"type": "dump", "id": sid, **d}
     elif op == "write_reg":
         sid, addr, size, val = int(cmd["id"]), int(cmd["addr"]), int(cmd.get("size", 1)), int(cmd["value"])
-        if cmd.get("unlock"):
+        unlock = bool(cmd.get("unlock"))
+        name = feetech.REGISTERS.get(addr, ("?",))[0]
+        rd = BUS.read_u8 if size == 1 else BUS.read_u16
+        old = rd(sid, addr)
+        if unlock:
             BUS.unlock(sid)
-        (BUS.write_u8 if size == 1 else BUS.write_u16)(sid, addr, val)
-        if cmd.get("unlock"):
-            BUS.lock(sid)
-        log(f"write id {sid} addr {addr} = {val}" + ("（解锁写入）" if cmd.get("unlock") else ""))
+        try:
+            err = (BUS.write_u8 if size == 1 else BUS.write_u16)(sid, addr, val)
+        finally:
+            if unlock:
+                BUS.lock(sid)
+        new = rd(sid, addr)
+        same = new == val & (0xFF if size == 1 else 0xFFFF)
+        log(f"#{sid} 写 {addr}「{name}」{old} → {val}{_ack(err)}，读回 {new}" + ("（解锁写入，已重新加锁）" if unlock else "")
+            + ("" if same else "（读回跟写的不一样：只读？超范围？扭矩开关写 128 这类命令值本来就读不回）"),
+            "寄存器", "info" if same else "warn")
     elif op == "reboot":
         sid = int(cmd["id"])
         BUS.write_u8(sid, 40, 0)
         BUS.reboot(sid)
-        log(f"reboot 0x08 -> id {sid}")
+        log(f"#{sid} 重启 0x08（先关了扭矩，约 0.8 s 后回来）", "寄存器")
     elif op == "calibrate":
-        sid = int(cmd["id"])
-        BUS.write_u8(sid, 40, 128)
-        log(f"中位校准（40 写 128）-> id {sid}")
+        return calibrate_mid_all([int(cmd["id"])], cmd.get("ref") or None)
     elif op == "set_id":
         ok = BUS.set_id(int(cmd["old"]), int(cmd["new"]))
-        log(f"set_id {cmd['old']} -> {cmd['new']}: {'ok' if ok else 'ping 不通'}")
+        log(f"改 ID {cmd['old']} → {cmd['new']}：" + ("新 ID ping 得通" if ok else "新 ID ping 不通"), "寄存器", "info" if ok else "error")
         return {"type": "scan", "present": do_scan(IDS)}
     elif op == "timing":
         return {"type": "timing", **do_timing(int(cmd.get("n", 200)))}
     elif op == "log":
-        return {"type": "log", "lines": LOG[-50:]}
+        return {"type": "logs", "items": LOG[-100:]}
+    elif op == "calib_mid_all":
+        ids = [int(i) for i in cmd.get("ids") or []] or list(PRESENT or IDS)
+        return calibrate_mid_all([i for i in ids if i in (PRESENT or IDS)], cmd.get("ref") or None)
+    elif op == "calib_undo":
+        return undo_calibration()
+    elif op == "set_dir":
+        dirs = load_dirs()
+        sid, d = int(cmd["id"]), (-1 if int(cmd["dir"]) < 0 else 1)
+        dirs[sid] = d
+        save_dirs(dirs)
+        log(f"方向 #{sid} → {d:+d}（已存 directions.json）", "方向")
+        return {"type": "dirs", "dirs": dirs}
     elif op == "save_pose":
         save_pose(str(cmd.get("name") or "pose"))
         return {"type": "poses", "poses": list_poses()}
     elif op == "poses":
         return {"type": "poses", "poses": list_poses()}
+    elif op == "page_log":
+        log(str(cmd.get("msg", ""))[:500], str(cmd.get("cat") or "页面"), cmd.get("level") if cmd.get("level") in ("info", "warn", "error") else "info")
+    elif op == "delete_pose":
+        delete_pose(str(cmd.get("file") or ""))
+        return {"type": "poses", "poses": list_poses()}
     else:
-        log(f"未知指令 {cmd}")
+        log(f"未知指令 {cmd}", "系统", "warn")
     return None
 
 
+async def broadcast(text):
+    for ws in list(CLIENTS):
+        try:
+            await ws.send_text(text)
+        except Exception:
+            CLIENTS.discard(ws)
+
+
 async def stream():
-    """按 STREAM_HZ 广播全部舵机状态。"""
+    """按 STREAM_HZ 广播全部舵机状态和新日志。读不到的舵机攒 3 秒报一次，同一个错误 5 秒内只记一次。"""
+    sent_n = LOG_N
+    miss, miss_t0 = {}, time.monotonic()
+    err_last, err_t = "", 0.0
     while True:
         t0 = time.monotonic()
         if CLIENTS and PRESENT:
             try:
                 st = await asyncio.to_thread(BUS.states, PRESENT)
-                msg = json.dumps({"type": "state", "t": time.time(), "states": st, "stats": BUS.stats})
-                for ws in list(CLIENTS):
-                    try:
-                        await ws.send_text(msg)
-                    except Exception:
-                        CLIENTS.discard(ws)
+                for i, v in st.items():
+                    if v is None:
+                        miss[i] = miss.get(i, 0) + 1
+                await broadcast(json.dumps({"type": "state", "t": time.time(), "states": st, "stats": BUS.stats}))
             except Exception as e:
-                log(f"stream error: {e}")
+                text = f"{type(e).__name__}: {e}"
+                if text != err_last or t0 - err_t > 5:
+                    log(f"刷新状态出错：{text}", "总线", "error", exc=True)
+                    err_last, err_t = text, t0
+        if t0 - miss_t0 >= 3:
+            if miss:
+                log("3 秒内读不到：" + " ".join(f"#{i}×{n}" for i, n in sorted(miss.items()))
+                    + f"（每秒读 {STREAM_HZ} 次；累计超时 {BUS.stats.get('timeout')}、校验错 {BUS.stats.get('bad_checksum')}）", "总线", "warn")
+            miss, miss_t0 = {}, t0
+        if CLIENTS and LOG_N > sent_n:
+            items = [e for e in LOG if e["n"] > sent_n]
+            if items:
+                sent_n = items[-1]["n"]
+                await broadcast(json.dumps({"type": "logs", "items": items}))
         await asyncio.sleep(max(0.0, 1.0 / STREAM_HZ - (time.monotonic() - t0)))
+
+
+# 指令 → 日志分类；QUIET 是拖滑块、流式这种高频指令，不逐条记
+OP_CAT = {"goal": "运动", "goals": "运动", "goals_stream": "运动", "stream_end": "运动", "goals_profile": "运动",
+          "release": "运动", "goals_verify": "运动", "torque": "运动", "scan": "总线", "scan_all": "总线", "timing": "总线",
+          "dump": "寄存器", "write_reg": "寄存器", "reboot": "寄存器", "set_id": "寄存器", "calibrate": "校准",
+          "calib_mid_all": "校准", "calib_undo": "校准", "set_dir": "方向", "save_pose": "姿态", "poses": "姿态",
+          "delete_pose": "姿态", "log": "系统", "page_log": "页面"}
+QUIET = {"goal", "goals", "goals_stream", "stream_end", "poses", "log", "release", "page_log"}
 
 
 async def ws_endpoint(ws):
     await ws.accept()
     CLIENTS.add(ws)
     await ws.send_text(json.dumps({"type": "hello", "ids": IDS, "present": PRESENT, "names": JOINT_NAMES,
-                                   "fake": is_fake(), "log": LOG[-50:]}))
+                                   "fake": is_fake(), "logs": LOG[-150:], "cats": LOG_CATS, "dirs": load_dirs(),
+                                   "regs": [[a, *feetech.REGISTERS[a]] for a in sorted(feetech.REGISTERS)],
+                                   "version": VERSION}))
     try:
         while True:
             cmd = json.loads(await ws.receive_text())
+            op = cmd.get("op")
+            if op not in QUIET:
+                log(f"收到 {json.dumps(cmd, ensure_ascii=False)[:300]}", OP_CAT.get(op, "系统"), "debug")
             try:
                 reply = await asyncio.to_thread(handle, cmd)
             except Exception as e:
-                reply = {"type": "error", "msg": f"{cmd.get('op')}: {e}"}
-                log(reply["msg"])
+                msg = f"{op} 出错：{type(e).__name__}: {e}"
+                log(msg, OP_CAT.get(op, "系统"), "error", exc=True)
+                reply = {"type": "error", "msg": msg}
             if reply:
                 await ws.send_text(json.dumps(reply))
     except WebSocketDisconnect:
@@ -423,6 +837,7 @@ app = Starlette(routes=[
     Route("/", index),
     Route("/api/info", info),
     Route("/api/poses", poses),
+    Route("/api/logfile", logfile),
     Route("/model/{name}", model_file),
     WebSocketRoute("/ws", ws_endpoint),
 ], lifespan=lifespan)
@@ -442,13 +857,13 @@ def main():
     if a.fake or not a.port:
         BUS = FakeBus(IDS)
         PRESENT = list(IDS)
-        log("假总线模式（--fake 或没给 --port）")
+        log("假总线模式（--fake 或没给 --port）", "系统")
     else:
         BUS = feetech.FeetechBus(a.port, a.baud)
-        log(f"串口 {a.port} @ {a.baud}")
+        log(f"舵机调试台 v{VERSION} 启动，串口 {a.port} @ {a.baud}，日志写在 {log_path()}", "总线")
         do_scan(IDS)
         read_phase()
-    print(f"浏览器开 http://127.0.0.1:{a.http_port}  （局域网用本机 IP）", flush=True)
+    print(f"舵机调试台 v{VERSION} · 浏览器开 http://127.0.0.1:{a.http_port}  （局域网用本机 IP）", flush=True)
     uvicorn.run(app, host=a.host, port=a.http_port, log_level="warning")
 
 
