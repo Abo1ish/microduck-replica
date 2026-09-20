@@ -275,22 +275,30 @@ fn cmd_set_id(bus: &mut StsBus, old_id: u8, new_id: u8) -> i32 {
             return 1;
         }
     }
+    // 最后那步「重新锁定」要发给**新 ID**：写完 ID 那一刻舵机就只认新 ID 了，
+    // 还发给旧 ID 的话这条命令没人收，舵机被留在 EEPROM 解锁状态（55=0），
+    // 之后任何一次误写 EEPROM 寄存器都会永久生效。飞特官方 SDK 也是 LockEprom(新ID)。
     let steps = [
-        (reg::LOCK, 0u8),  // 解锁 EEPROM
-        (reg::ID, new_id), // 写入新 ID
-        (reg::LOCK, 1),    // 重新锁定
+        (old_id, reg::LOCK, 0u8),  // 解锁 EEPROM
+        (old_id, reg::ID, new_id), // 写入新 ID —— 生效后这颗舵机改名了
+        (new_id, reg::LOCK, 1),    // 重新锁定，发给新 ID
     ];
-    for (addr, val) in steps {
-        if let Err(e) = bus.write_u8(old_id, addr, val) {
+    for (id, addr, val) in steps {
+        if let Err(e) = bus.write_u8(id, addr, val) {
             eprintln!("写寄存器 {addr} 失败: {e}");
             return 1;
         }
         thread::sleep(Duration::from_millis(50)); // 等 EEPROM 写入完成
     }
-    // 用新 ID 验证
+    // 用新 ID 验证，并回读锁标志确认真的锁上了
     match bus.ping(new_id) {
         Ok(true) => {
+            let locked = bus.read_u8(new_id, reg::LOCK).unwrap_or(0);
             println!("✅ 修改成功：ID {old_id} -> {new_id}（断电重启后依然有效）");
+            if locked != 1 {
+                eprintln!("⚠ 锁标志回读为 {locked}，EEPROM 还开着，手动写一下：set-id 后请重新确认");
+                return 1;
+            }
             0
         }
         _ => {
