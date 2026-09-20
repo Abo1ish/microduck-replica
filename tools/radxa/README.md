@@ -5,9 +5,13 @@
 原因是 Armbian 给这块板配的主线 U-Boot（内存初始化固件 2024-01 的 v1.21）带不起新板，换成瑞莎自家的引导程序就好。
 这个目录把换引导、写 WiFi、开串口、开 USB 控制台全打进镜像里，烧完插上就能 ssh。
 
+**不想自己做卡？** [release 里有做好的镜像](https://github.com/fanhao375/microduck-replica/releases)（不带 WiFi，插 USB 当串口进去连），
+烧完就能开机，用法见[镜像使用说明](镜像使用说明.md)。板子不是这一批（比如 V1.12J、WiFi 换成移远 FSK960K）也在那篇里说了怎么办。
+
 | 文件 | 干什么 |
 |---|---|
-| `card.conf` | 改 WiFi 名 / 密码，用户名密码默认 `duck` / `duck1234`；国内要装官方软件时填一个 HTTP 代理 |
+| `card.conf` | 改 WiFi 名 / 密码，用户名密码默认 `duck` / `duck1234`；国内要装官方软件时填一个 HTTP 代理。**WiFi 两行留空 = 公开镜像模式**，不写任何网络配置 |
+| `镜像使用说明.md` | 给 release 里那张镜像用的：烧卡、USB 串口登录、连 WiFi、换引导救别的批次的板子 |
 | `1-做卡.ps1` | Windows 右键「使用 PowerShell 运行」，选下载的 `.img.xz`，出一个 `xxx-鸭子卡.img`，Rufus 烧它 |
 | `build-armbian-card.sh` | 实际干活的脚本，Linux / WSL 里 `sudo bash build-armbian-card.sh xxx.img.xz card.conf` |
 

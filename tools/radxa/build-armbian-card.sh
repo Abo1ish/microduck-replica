@@ -20,7 +20,14 @@ CONF="${2:-$HERE/card.conf}"
 [ -f "$CONF" ] || { echo "找不到 $CONF"; exit 1; }
 # shellcheck disable=SC1090
 . <(tr -d '\r' < "$CONF")
-[ -n "${WIFI_SSID:-}" ] && [ "${WIFI_SSID}" != "改成你的WiFi名" ] || { echo "先把 card.conf 里的 WiFi 名和密码改掉"; exit 1; }
+# WIFI_SSID 留空 = 公开镜像模式：不写任何网络配置，开机后插 USB 当串口进去自己连
+PUBLIC=0
+if [ -z "${WIFI_SSID:-}" ]; then
+  PUBLIC=1
+  echo "公开镜像模式：不写 WiFi，开机后用 USB 串口（COM 口）进去连网"
+elif [ "${WIFI_SSID}" = "改成你的WiFi名" ]; then
+  echo "先把 card.conf 里的 WiFi 名和密码改掉，或者整行留空做公开镜像"; exit 1
+fi
 
 UBOOT_DEB_URL=https://radxa-repo.github.io/bookworm/pool/main/u/u-boot-rk2410/u-boot-rk2410_2017.09-64-39cd993_arm64.deb
 UBOOT_DEB_SHA=fb319203ab7d568aac77505504c05698385aea8a0e8f895c226c6bc557a1bce7
@@ -87,20 +94,64 @@ PRESET_LOCALE='en_US.UTF-8'
 PRESET_TIMEZONE='Asia/Shanghai'
 PRESET
 chmod 600 "$R/root/.not_logged_in_yet"
-cat > "$R/etc/netplan/30-wifis-dhcp.yaml" <<YAML
-network:
-  version: 2
-  renderer: networkd
-  wifis:
-    wlan0:
-      dhcp4: yes
-      dhcp6: no
-      regulatory-domain: CN
-      access-points:
-        "$WIFI_SSID":
-          password: "$WIFI_PASSWORD"
-YAML
-chmod 600 "$R/etc/netplan/30-wifis-dhcp.yaml"
+if [ "$PUBLIC" = 1 ]; then
+cat > "$R/root/先连WiFi.txt" <<'NOTE'
+这张卡没写 WiFi（公开镜像）。板子没有网口，登录后自己配，两种办法：
+
+A) 命令行配（下面这套是在 V1.12 + AIC8800 上实测能连的写法）：
+
+   sudo tee /etc/wpa_supplicant/wpa_supplicant-wlan0.conf >/dev/null <<'CONF'
+   ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev
+   update_config=1
+   country=CN
+
+   network={
+       ssid="你的WiFi名"
+       psk="你的WiFi密码"
+       key_mgmt=WPA-PSK
+       pairwise=CCMP
+       ieee80211w=0
+       scan_ssid=1
+       priority=10
+   }
+   CONF
+   sudo chmod 600 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+   sudo systemctl enable --now wpa_supplicant@wlan0
+   ip a show wlan0          # 看有没有拿到 IP（DHCP 由系统自带的 netplan 做）
+
+   pairwise=CCMP 和 ieee80211w=0 这两行别删：AIC8800 不支持 GCMP-256，
+   路由器开 WPA2/WPA3 混合模式时，不写这两行握手会失败。
+
+B) 图形界面：sudo nmtui，选 Activate a connection 挑 WiFi。
+   （连不上就用 A，多半还是上面那个 WPA3 的问题）
+
+烧卡前就想把 WiFi 写进去：用仓库里的 tools/radxa/build-armbian-card.sh，
+card.conf 填上 WiFi 名和密码，自己生成一张带网的卡。
+NOTE
+chmod 644 "$R/root/先连WiFi.txt"
+else
+# WiFi 用 wpa_supplicant（V1.12 + AIC8800 实测能连的那套；netplan 的写法没在这块板上验证过）。
+# pairwise=CCMP + ieee80211w=0 是绕开 AIC8800 不支持 GCMP-256 的关键，路由器开 WPA2/WPA3 混合时缺了就握不上手。
+# DHCP 交给 Armbian 自带的 /etc/netplan/10-dhcp-all-interfaces.yaml。
+mkdir -p "$R/etc/wpa_supplicant"
+cat > "$R/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" <<CONF
+ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=CN
+
+network={
+    ssid="$WIFI_SSID"
+    psk="$WIFI_PASSWORD"
+    key_mgmt=WPA-PSK
+    pairwise=CCMP
+    ieee80211w=0
+    scan_ssid=1
+    priority=10
+}
+CONF
+chmod 600 "$R/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+ln -sf /lib/systemd/system/wpa_supplicant@.service "$R/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service"
+fi
 if [ -n "${HTTP_PROXY:-}" ]; then
   printf 'http_proxy=%s\nhttps_proxy=%s\nHTTP_PROXY=%s\nHTTPS_PROXY=%s\nno_proxy=localhost,127.0.0.1,192.168.0.0/16\nNO_PROXY=localhost,127.0.0.1,192.168.0.0/16\n' "$HTTP_PROXY" "$HTTP_PROXY" "$HTTP_PROXY" "$HTTP_PROXY" >> "$R/etc/environment"
 fi
@@ -114,4 +165,8 @@ rm -f "$R/etc/systemd/system/getty.target.wants/serial-getty@ttyFIQ0.service"
 sync; umount "$R"
 cp "$WORK/card.img" "$OUT"
 echo; echo "好了，用 Rufus / Armbian Imager 烧这个： $OUT"
-echo "开机 2~3 分钟后路由器里找 radxa-zero3，ssh ${USER_NAME:-duck}@IP，密码 ${USER_PASSWORD:-duck1234}；插电脑的那根 USB 线同时是串口（COM 口）。"
+if [ "$PUBLIC" = 1 ]; then
+  echo "公开镜像：没写 WiFi。插电脑的 USB 线就是串口（COM 口，115200），登录 ${USER_NAME:-duck}/${USER_PASSWORD:-duck1234} 后按 /root/先连WiFi.txt 连网，第一件事改密码。"
+else
+  echo "开机 2~3 分钟后路由器里找 radxa-zero3，ssh ${USER_NAME:-duck}@IP，密码 ${USER_PASSWORD:-duck1234}；插电脑的那根 USB 线同时是串口（COM 口）。"
+fi
