@@ -165,6 +165,16 @@ def main():
     check("Traceback" in text and "[校准][错误]" in text, "日志文件里有分类和 traceback")
     H({"op": "torque", "id": 33, "on": 1})
 
+    print("串口原始收发进日志文件")
+    server.BUS.trace = server.bus_trace
+    H({"op": "calibrate", "id": 32})
+    text = open(server.log_path(), encoding="utf-8").read()
+    check("→ #32 位置校准" in text, "发出去的 0x0B 包记下来了（含十六进制）")
+    check("地址40「扭矩开关」" in text and "地址31" in text, "读写寄存器记了地址和名字")
+    check("← #32 状态0x00" in text, "舵机的应答也记了")
+    check("SYNC_READ" not in text, "10 Hz 的状态轮询不记，不然日志全是它")
+    server.BUS.trace = None
+
     print("日志分类")
     cats = {e["cat"] for e in server.LOG}
     check({"总线", "运动", "校准", "姿态"} <= cats, f"出现的分类 {sorted(cats)}")

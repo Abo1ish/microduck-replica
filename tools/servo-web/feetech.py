@@ -13,6 +13,9 @@ import serial
 PING, READ, WRITE, REG_WRITE, ACTION = 0x01, 0x02, 0x03, 0x04, 0x05
 RECOVERY, REBOOT, BACKUP, RESET_TURNS, CALIBRATE = 0x06, 0x08, 0x09, 0x0A, 0x0B
 SYNC_READ, SYNC_WRITE = 0x82, 0x83
+INSTR_NAMES = {0x01: "PING", 0x02: "READ", 0x03: "WRITE", 0x04: "REG_WRITE", 0x05: "ACTION",
+               0x06: "参数恢复", 0x08: "REBOOT", 0x09: "参数备份", 0x0A: "清圈数", 0x0B: "位置校准",
+               0x82: "SYNC_READ", 0x83: "SYNC_WRITE"}
 BROADCAST = 0xFE
 
 # 内存表：地址 -> (名字, 字节数, 区)。给寄存器导出用。
@@ -72,6 +75,11 @@ class FeetechBus:
         self.ser = ser if ser is not None else serial.Serial(port, baud, timeout=timeout, write_timeout=0.1)
         # 串口互斥锁。别叫 self.lock：会盖住下面的 lock(sid)「加 EEPROM 锁」方法（2026-09-20 真机踩到）
         self._io = threading.Lock()
+        # 原始收发记录：设一个 trace(文本) 回调就开始记。飞特不支持的操作照样回"成功"，
+        # 只有对着十六进制才分得清「真做了」和「装作做了」。10 Hz 的状态轮询不记，不然日志全是它
+        self.trace = None
+        self.trace_skip = {SYNC_READ, SYNC_WRITE}
+        self._last = (None, None)
         self.stats = {"tx": 0, "rx_ok": 0, "timeout": 0, "bad_checksum": 0, "bad_id": 0}
 
     def close(self):
@@ -86,8 +94,17 @@ class FeetechBus:
 
     def _send(self, sid, instr, params=b""):
         self.ser.reset_input_buffer()
-        self.ser.write(self._packet(sid, instr, params))
+        pkt = self._packet(sid, instr, params)
+        self.ser.write(pkt)
         self.stats["tx"] += 1
+        self._last = (sid, instr)
+        if self.trace and instr not in self.trace_skip:
+            note = ""
+            if instr in (READ, WRITE) and params:
+                reg = REGISTERS.get(params[0])
+                note = f"  地址{params[0]}" + (f"「{reg[0]}」" if reg else "") + (
+                    f" 写 {list(params[1:])}" if instr == WRITE else f" 读 {params[1]} 字节")
+            self.trace(f"→ #{sid} {INSTR_NAMES.get(instr, hex(instr))} {hexs(pkt)}{note}")
 
     def _read_status(self, expect_id=None):
         """读一个应答帧，返回 (id, error, params)。"""
@@ -122,6 +139,9 @@ class FeetechBus:
             self.stats["bad_id"] += 1
             raise BusError(f"等 id {expect_id} 的应答，来的是 id {sid}（ff ff {hexs(rest + body)}）")
         self.stats["rx_ok"] += 1
+        if self.trace and self._last[1] not in self.trace_skip:
+            self.trace(f"← #{sid} 状态0x{err:02X} {hexs(b'\xff\xff' + rest + body)}"
+                       + (f"  数据 {list(params)}" if params else ""))
         return sid, err, bytes(params)
 
     # ---- 指令 ----

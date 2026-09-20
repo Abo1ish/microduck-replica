@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 调试台版本。改了前端或后端就加一：index.html 里的 PAGE_VERSION 要跟这里一样，
 # 页面连上后会比对，不一样就提示"页面是旧的，Ctrl+F5"。改动记在 README 的「版本」一节。
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 DEFAULT_IDS = "20-24,30-34,10-14"
 JOINT_NAMES = {
     20: "left_hip_yaw", 21: "left_hip_roll", 22: "left_hip_pitch", 23: "left_knee", 24: "left_ankle",
@@ -211,6 +211,12 @@ def list_ports():
         return []
 
 
+def bus_trace(line):
+    """串口收发的原始字节，只进日志文件（页面不显示，不然刷屏）。
+    出问题时 grep 日志文件里的 → / ← 就能还原当时总线上到底发生了什么。"""
+    log(line, "总线", "debug")
+
+
 def open_bus(port, baud=None):
     """打开串口并接管总线。失败不抛异常，返回 {ok, msg}，页面照样能用（假总线）。"""
     global BUS, PORT, BAUD, PRESENT
@@ -222,6 +228,7 @@ def open_bus(port, baud=None):
         msg = f"打不开 {port}：{type(e).__name__}: {e}；现在能看到的串口：{ports}"
         log(msg, "总线", "error")
         return {"ok": False, "msg": msg}
+    bus.trace = bus_trace
     old = BUS
     BUS, PORT, BAUD = bus, port, baud
     if old is not None and not isinstance(old, FakeBus):
@@ -276,10 +283,13 @@ def _ack(err):
 
 
 def fmt_off(v):
-    """偏移寄存器 31：HD-1910 第 15 位是符号位，34279 = -1511。"""
+    """偏移寄存器 31：HD-1910 第 15 位是符号位，34279 = -1511。
+    传进来的可能是原始寄存器值，也可能是已经解过符号的负数，两种都得印对。"""
     if v is None:
         return "?"
-    return f"{feetech.sign15(v)}({v})" if v & 0x8000 else str(v)
+    if v < 0:
+        return str(v)                                  # 已经是带符号的，直接印
+    return f"{feetech.sign15(v)}（原始{v}）" if v & 0x8000 else str(v)
 
 
 def is_fake():
