@@ -147,6 +147,20 @@ HD-1910 跟 XL330 的力矩、减速比、阻尼都不一样，官方预训练�
 
 ---
 
+## 🦆 鸭友贡献
+
+这个仓库不是一个人写的。合并进来的代码、实测验证过的结论，都记在这儿。
+
+| 谁 | 贡献了什么 |
+|---|---|
+| [@yoyojacky](https://github.com/yoyojacky) | **Rust 版飞特舵机测试工具**（[PR #27](https://github.com/fanhao375/microduck-replica/pull/27)，已合并）。自己实现的最小 STS/SCS 协议（帧打包、校验和、ping、读写寄存器、状态解析），命令行可以扫描总线（带进度条）、读状态、转到指定位置、单颗测试和批量测试，输出位置偏差、峰值电流、峰值负载、电压温度并判定 PASS/FAIL。台架验收一条命令出汇总表 → [`tools/sts3215Servo_testtool/`](tools/sts3215Servo_testtool/) |
+| 微信群的鸭友 | **Radxa Zero 3W V1.12J 的启动方案**。这批板子（WiFi 换成 AIC8800DS2）光换瑞莎引导还是起不来，他实测出设备树也得换成瑞莎 B1 的：**B1 引导 + B1 DTB + Armbian 6.1.115 内核 + Trixie 系统**，跑通了 → 写进了[踩坑记录](踩坑记录.md#软件)和[镜像使用说明](tools/radxa/镜像使用说明.md#6-如果你的板子不是这一批) |
+
+想加进来：直接开 [issue](https://github.com/fanhao375/microduck-replica/issues) 或提 PR。
+硬件、固件、算法、文档、实测数据都算 —— **实测数据尤其欢迎**，这个仓库的规矩是结论如实记录，无论正反。
+
+---
+
 ## 装配爆炸图
 
 ![爆炸图](assembly-drawings/06_爆炸图_四分之三.png)
