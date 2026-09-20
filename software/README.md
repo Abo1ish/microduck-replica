@@ -33,6 +33,8 @@ cd microduck && cargo test -p duck-control -p robotd-params -p robotd
 |---|---|
 | [`飞特适配架构.md`](飞特适配架构.md) | 官方运行时现有架构（接缝在哪、每个 tick 干什么、开机序列）、两家舵机逐项差别、适配方案、**`imu_to_dxl` 小板固件架构（§4）**、台架验收、待查清单、构建部署 / 策略关系 / 失败模式、评审记录 |
 
+小板固件的接口契约（15 字节块、时序、排队规则、验收）单独成文：[`hardware/imu_to_dxl/总线协议.md`](../hardware/imu_to_dxl/总线协议.md)，配套工具 [`tools/imu200/`](../tools/imu200/)（假小板 + 测试向量 + 真板子验收）。
+
 板子怎么烧、怎么装官方运行时，在 [不打 HAT](../docs/不打HAT.md) 和 [`tools/radxa/`](../tools/radxa/)。
 
 飞特协议和内存表的官方原文（2026 年版快照）在 [`docs/飞特资料/`](../docs/飞特资料/)。

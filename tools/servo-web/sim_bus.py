@@ -180,16 +180,19 @@ class SimSerial:
             addr, ln = p[0], p[1]
             for i in p[2:]:
                 s = self._by_id(i)
-                if s:
+                # alive() 给假 IMU 小板用：模拟"总线处理器还没起来"和"板子彻底不答"
+                if s and addr not in getattr(s, "muted", ()) and getattr(s, "alive", lambda _: True)(self.clock):
                     self._reply(s, s.read(addr, ln, self.clock))
             return
         s = self._by_id(sid)
         if s is None:
             return
         if instr == feetech.PING:
+            if sid == feetech.BROADCAST or not getattr(s, "alive", lambda _: True)(self.clock):
+                return                                       # 手册：总线上多个设备时不能用广播 PING
             self._reply(s)
         elif instr == feetech.READ:
-            if p[0] in s.muted:
+            if p[0] in s.muted or not getattr(s, "alive", lambda _: True)(self.clock):
                 return
             self._reply(s, s.read(p[0], p[1], self.clock))
         elif instr == feetech.WRITE:
