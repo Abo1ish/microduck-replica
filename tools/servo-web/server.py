@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 调试台版本。改了前端或后端就加一：index.html 里的 PAGE_VERSION 要跟这里一样，
 # 页面连上后会比对，不一样就提示"页面是旧的，Ctrl+F5"。改动记在 README 的「版本」一节。
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 DEFAULT_IDS = "20-24,30-34,10-14"
 JOINT_NAMES = {
     20: "left_hip_yaw", 21: "left_hip_roll", 22: "left_hip_pitch", 23: "left_knee", 24: "left_ankle",
@@ -159,6 +159,8 @@ class FakeBus:
 
 
 BUS = None
+PORT = None        # 当前串口名；None = 假总线
+BAUD = 1_000_000
 IDS = []
 PRESENT = []
 CLIENTS = set()
@@ -197,6 +199,48 @@ def read_phase():
         log("已把全部舵机速度上限放开、加速度设最大")
     except Exception as e:
         log(f"读相位失败，速度单位按 1 步/秒：{type(e).__name__}: {e}", "系统", "warn", exc=True)
+
+
+def list_ports():
+    """系统里现在有哪些串口。拔插 USB 后口号会变，页面上直接选，不用重启服务。"""
+    try:
+        from serial.tools import list_ports as lp
+        return [{"device": p.device, "desc": (p.description or "").strip()} for p in lp.comports()]
+    except Exception as e:
+        log(f"列串口失败：{type(e).__name__}: {e}", "总线", "warn")
+        return []
+
+
+def open_bus(port, baud=None):
+    """打开串口并接管总线。失败不抛异常，返回 {ok, msg}，页面照样能用（假总线）。"""
+    global BUS, PORT, BAUD, PRESENT
+    baud = baud or BAUD
+    try:
+        bus = feetech.FeetechBus(port, baud)
+    except Exception as e:
+        ports = "、".join(p["device"] for p in list_ports()) or "一个都没有"
+        msg = f"打不开 {port}：{type(e).__name__}: {e}；现在能看到的串口：{ports}"
+        log(msg, "总线", "error")
+        return {"ok": False, "msg": msg}
+    old = BUS
+    BUS, PORT, BAUD = bus, port, baud
+    if old is not None and not isinstance(old, FakeBus):
+        try:
+            old.close()
+        except Exception:
+            pass
+    log(f"串口 {port} @ {baud} 已打开", "总线")
+    do_scan(IDS)
+    read_phase()
+    return {"ok": True, "msg": f"{port} 已连上，在线 {len(PRESENT)} 颗"}
+
+
+def fallback_fake(why):
+    """没有串口时退到假总线：页面照开，能看界面、看 3D，就是不动真舵机。"""
+    global BUS, PORT, PRESENT
+    BUS, PORT = FakeBus(IDS), None
+    PRESENT = list(IDS)
+    log(f"{why}，先用假总线把页面起起来；插好 USB 后在页面顶栏选串口点「连接」", "总线", "warn")
 
 
 def log_path():
@@ -726,6 +770,15 @@ def handle(cmd):
     elif op == "calib_mid_all":
         ids = [int(i) for i in cmd.get("ids") or []] or list(PRESENT or IDS)
         return calibrate_mid_all([i for i in ids if i in (PRESENT or IDS)], cmd.get("ref") or None)
+    elif op == "ports":
+        return {"type": "ports", "ports": list_ports(), "port": PORT, "fake": is_fake()}
+    elif op == "reconnect":
+        port = str(cmd.get("port") or PORT or "")
+        if not port:
+            return {"type": "reconnect", "ok": False, "msg": "先选一个串口"}
+        r = open_bus(port, int(cmd.get("baud") or BAUD))
+        return {"type": "reconnect", **r, "port": PORT, "fake": is_fake(), "present": PRESENT,
+                "ports": list_ports()}
     elif op == "calib_undo":
         return undo_calibration()
     elif op == "set_dir":
@@ -804,6 +857,7 @@ async def ws_endpoint(ws):
     CLIENTS.add(ws)
     await ws.send_text(json.dumps({"type": "hello", "ids": IDS, "present": PRESENT, "names": JOINT_NAMES,
                                    "fake": is_fake(), "logs": LOG[-150:], "cats": LOG_CATS, "dirs": load_dirs(),
+                                   "port": PORT, "ports": list_ports(),
                                    "regs": [[a, *feetech.REGISTERS[a]] for a in sorted(feetech.REGISTERS)],
                                    "version": VERSION}))
     try:
@@ -844,7 +898,7 @@ app = Starlette(routes=[
 
 
 def main():
-    global BUS, IDS, PRESENT
+    global BUS, IDS, PRESENT, BAUD
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", help="串口，如 COM5 / /dev/ttyUSB0 / /dev/ttyS2")
     ap.add_argument("--baud", type=int, default=1_000_000)
@@ -854,15 +908,14 @@ def main():
     ap.add_argument("--http-port", type=int, default=8080)
     a = ap.parse_args()
     IDS = parse_ids(a.ids)
+    BAUD = a.baud
+    log(f"舵机调试台 v{VERSION} 启动，日志写在 {log_path()}", "系统")
     if a.fake or not a.port:
-        BUS = FakeBus(IDS)
-        PRESENT = list(IDS)
-        log("假总线模式（--fake 或没给 --port）", "系统")
-    else:
-        BUS = feetech.FeetechBus(a.port, a.baud)
-        log(f"舵机调试台 v{VERSION} 启动，串口 {a.port} @ {a.baud}，日志写在 {log_path()}", "总线")
-        do_scan(IDS)
-        read_phase()
+        fallback_fake("没给 --port（或用了 --fake）" if not a.port else "--fake")
+    elif not open_bus(a.port, a.baud)["ok"]:
+        # 串口打不开（USB 没插、口号变了、被别的程序占着）也要把页面起起来，
+        # 插好以后在页面顶栏选串口点「连接」就行，不用重启服务
+        fallback_fake(f"串口 {a.port} 打不开")
     print(f"舵机调试台 v{VERSION} · 浏览器开 http://127.0.0.1:{a.http_port}  （局域网用本机 IP）", flush=True)
     uvicorn.run(app, host=a.host, port=a.http_port, log_level="warning")
 

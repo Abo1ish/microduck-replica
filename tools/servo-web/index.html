@@ -62,6 +62,10 @@
   <span><span class="dot" id="dot"></span><span id="conn">连接中</span></span>
   <span style="display:flex;gap:14px;font-size:13px"><span>在线 <b id="stOnline">–</b></span><span>刷新 <b id="stHz">–</b></span><span>电压 <b id="stVolt">–</b></span></span>
   <span class="muted" id="busInfo" style="font-size:12px"></span>
+  <span id="portBox" style="display:none">
+    <select id="portSel" title="系统里现在能看到的串口；拔插 USB 后口号会变"></select>
+    <button onclick="reconnect()" title="打开选中的串口并重新扫描舵机，不用重启服务">连接</button>
+  </span>
   <button class="ok" onclick="torqueAll(1)">全部扭矩开</button>
   <button class="danger" onclick="torqueAll(0)">全部扭矩关</button>
   <button onclick="syncSliders()">滑块对齐当前位置</button>
@@ -164,7 +168,7 @@
 
 <script>
 // 跟 server.py 的 VERSION 一起改。连上后比对，不一致说明浏览器拿的是旧页面
-const PAGE_VERSION = "0.8.0";
+const PAGE_VERSION = "0.8.1";
 const $ = id => document.getElementById(id);
 const v = id => Number($(id).value);
 let ws, names = {}, present = [], ids = [], lastDump = null, sendTimer = {}, lastSent = {};
@@ -183,7 +187,13 @@ function connect() {
       $('ver').style.color = same ? '' : 'var(--bad)';
       $('ver').title = same ? '页面和服务版本一致' : '浏览器里是旧页面或服务没重启：先重启 server.py，再 Ctrl+F5';
       if (!same) hint(`页面 v${PAGE_VERSION} 跟服务 v${sv} 不一致：重启 server.py 后按 Ctrl+F5`);
-      dirs = {}; for (const [k, v] of Object.entries(m.dirs || {})) dirs[k] = v; names = m.names; ids = m.ids; present = m.present; $('busInfo').textContent = m.fake ? '假总线（--fake）' : ''; REGS = (m.regs || []).filter(r => r[3] === 'EEPROM' || r[3] === 'SRAM'); fillLogCats(m.cats || []); build(); fillRegSelect(); (m.logs || []).forEach(pushLog); send({ op: 'poses' }); }
+      dirs = {}; for (const [k, v] of Object.entries(m.dirs || {})) dirs[k] = v; names = m.names; ids = m.ids; present = m.present;  REGS = (m.regs || []).filter(r => r[3] === 'EEPROM' || r[3] === 'SRAM'); showPorts(m); fillLogCats(m.cats || []); build(); fillRegSelect(); (m.logs || []).forEach(pushLog); send({ op: 'poses' }); }
+    else if (m.type === 'ports') showPorts(m);
+    else if (m.type === 'reconnect') {
+      showPorts(m);
+      if (m.ok) { present = m.present || []; build(); hint(m.msg); }
+      else hint(m.msg);
+    }
     else if (m.type === 'poses') renderPoses(m.poses);
     else if (m.type === 'dirs') { dirs = {}; for (const [k, v] of Object.entries(m.dirs || {})) dirs[k] = v; }
     else if (m.type === 'calib_result') showCalibResult(m);
@@ -197,6 +207,29 @@ function connect() {
   };
 }
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+// 串口：没连上时顶栏出现下拉 + 「连接」；连上了只显示口号。拔插 USB 后口号会变，点一下就能重连
+function showPorts(m) {
+  if (m.fake === undefined) return;
+  const box = $('portBox'), sel = $('portSel');
+  $('busInfo').textContent = m.fake ? '没连串口（假总线，舵机不会动）' : `串口 ${m.port}`;
+  $('busInfo').style.color = m.fake ? 'var(--warn)' : '';
+  box.style.display = '';
+  if (m.ports) {
+    const keep = sel.value; sel.innerHTML = '';
+    (m.ports.length ? m.ports : [{ device: '', desc: '没找到串口，插上 USB 再点刷新' }]).forEach(p => {
+      const o = document.createElement('option'); o.value = p.device;
+      o.textContent = p.device + (p.desc ? ` · ${p.desc}` : ''); sel.appendChild(o);
+    });
+    const opts = [...sel.options].map(o => o.value);
+    if (opts.includes(keep)) sel.value = keep; else if (m.port && opts.includes(m.port)) sel.value = m.port;
+  }
+}
+function reconnect() {
+  const port = $('portSel').value;
+  if (!port) { send({ op: 'ports' }); hint('先插上 USB，再点一次'); return; }
+  hint(`正在打开 ${port}…`);
+  send({ op: 'reconnect', port });
+}
 let hintTimer;
 function hint(text) { const h = $('hint'); h.textContent = text; h.classList.add('show'); clearTimeout(hintTimer); hintTimer = setTimeout(() => h.classList.remove('show'), 5000); }
 // ---- 日志 ----
