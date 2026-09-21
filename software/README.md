@@ -1,10 +1,10 @@
 # software · 软件适配
 
-官方运行时 [`pollen-robotics/microduck`](https://github.com/pollen-robotics/microduck) 是照 Dynamixel XL330 写的，本仓库主线用飞特 HD-1910，软件要改。这个目录包含**分析和方案**以及下方的裸板姿态工程；官方运行时适配代码在 fork 出来的分支里。
+官方运行时 [`pollen-robotics/microduck`](https://github.com/pollen-robotics/microduck) 是照 Dynamixel XL330 写的，本仓库主线用飞特 HD-1910，软件要改。这个目录放**分析和方案**；官方运行时适配代码在 fork 出来的分支里。
 
-## 裸板姿态工程
+## IMU 裸板调试
 
-[`imu-board-viewer/`](imu-board-viewer/) 包含 Windows 队友启动器、J-Link → 浏览器 3D 鸭子、无硬件演示和配套 STM32G031 + LSM6DSV16X 固件。复制整个目录、填写自己的探针配置即可按说明验证裸板姿态，也可生成独立分享 ZIP。
+STM32G031 + LSM6DSV16X 固件与硬件资料放在 [`hardware/imu_to_dxl/firmware/`](../hardware/imu_to_dxl/firmware/)。姿态显示并入 [`tools/servo-web/`](../tools/servo-web/)：使用 `python server.py --port COM5 --imu-jlink imu-jlink.json`，同一个模型同时接收舵机关节角和 J-Link 的躯干姿态；只有裸板时可用 `--fake` 代替串口参数。
 
 **范围：SWD 台架观察。** 附带固件仍是 Dynamixel Protocol 2.0 基线，尚未实现飞特地址 56、15 字节契约，不能据此宣布飞特 IMU 总线或整机验收通过。
 

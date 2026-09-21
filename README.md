@@ -57,7 +57,7 @@ MJCF 里包含了完整的运动学树：每个零件挂在谁身上、相对位
 
 ## 最近更新
 
-**裸板姿态查看器**：[`software/imu-board-viewer/`](software/imu-board-viewer/) 提供可分享的 J-Link 调试工程，让浏览器中的 3D 鸭子跟随 IMU 板姿态，也能无硬件演示。附带固件用于 SWD 台架验证，飞特 15 字节总线协议尚未实现。
+**IMU 姿态接入调试台**：[`tools/servo-web/`](tools/servo-web/) 可选接入 J-Link，在同一个 3D 鸭子上显示舵机关节角与 IMU 躯干姿态。配套裸板固件在 [`hardware/imu_to_dxl/firmware/`](hardware/imu_to_dxl/firmware/)；飞特 15 字节总线协议尚未实现。
 
 
 <table>
