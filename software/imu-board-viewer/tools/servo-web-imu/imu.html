@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Microduck · IMU 实时姿态</title>
+  <style>
+    :root { color-scheme:dark; --bg:#0b1217; --panel:#111d24; --line:#24343d; --text:#e8f0f1; --muted:#97aab3; --mint:#60e5c2; --amber:#f4be71; --red:#ff8190; --blue:#80baff; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.55 Inter,"Segoe UI","Microsoft YaHei",sans-serif; }
+    button,select { font:inherit; } button,select,a { -webkit-tap-highlight-color:transparent; } button:focus-visible,select:focus-visible,a:focus-visible { outline:2px solid var(--mint); outline-offset:3px; }
+    .shell { max-width:1600px; margin:auto; padding:25px 32px 20px; } header { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:22px; }
+    .brand { display:flex; gap:13px; align-items:center; } .mark { width:43px; height:43px; color:var(--mint); display:grid; place-items:center; border:1px solid #34534f; background:#162d2c; border-radius:13px; }
+    h1 { margin:0; font-size:21px; font-weight:650; letter-spacing:-.5px; } .subtitle { margin:1px 0 0; font-size:12px; color:var(--muted); letter-spacing:.3px; }
+    .head-right { display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end; } .badge { border:1px solid var(--line); background:#142028; border-radius:22px; padding:6px 11px; font-size:12px; white-space:nowrap; color:var(--muted); }
+    .badge.status { color:var(--amber); } .dot { display:inline-block; height:7px; width:7px; border-radius:50%; margin-right:7px; background:currentColor; } .badge.ok { color:var(--mint); border-color:#2a554b; background:#122b26; } .badge.bad { color:var(--red); border-color:#68404b; background:#291d25; } .badge.demo { color:var(--amber); border-color:#6b5230; background:#32271b; }
+    main { display:grid; grid-template-columns:minmax(0,1fr) 350px; gap:18px; align-items:start; } .panel { border:1px solid var(--line); border-radius:17px; overflow:hidden; background:var(--panel); }
+    .view-head { padding:18px 21px; display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--line); } h2 { margin:0; font-size:15px; font-weight:600; } .eyebrow { color:var(--mint); font-size:10px; letter-spacing:2px; margin-bottom:3px; font-weight:600; }
+    .minor { color:var(--muted); font-size:12px; } .viewport { position:relative; height:min(61vh,650px); min-height:390px; background:radial-gradient(ellipse at center,#182b32,#0e181f); } canvas#view { display:block; width:100%; height:100%; touch-action:none; }
+    .view-top { position:absolute; z-index:1; left:18px; top:17px; right:18px; display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none; gap:16px; } .view-tag { color:#8ca4ae; font:10px/1.5 Consolas,monospace; letter-spacing:1.3px; } #modelState { color:#91a4ad; font-size:11px; max-width:50%; text-align:right; }
+    #overlay { position:absolute; z-index:2; left:50%; top:43%; transform:translate(-50%,-50%); background:#13232aef; border:1px solid #34515e; box-shadow:0 16px 60px #0005; border-radius:14px; padding:17px 22px; width:max-content; max-width:85%; text-align:center; pointer-events:none; backdrop-filter:blur(6px); } #overlay[hidden] { display:none; } #overlay strong { display:block; font-size:16px; margin-bottom:4px; } #overlay span { color:var(--muted); font-size:12px; }
+    .view-bottom { position:absolute; bottom:15px; left:18px; right:18px; display:flex; align-items:center; justify-content:space-between; gap:12px; pointer-events:none; } .axis-legend { display:flex; gap:12px; font:11px Consolas,monospace; } .x { color:#ff8b93; } .y { color:#79dfb1; } .z { color:#85bbff; } .mouse-hint { font-size:11px; color:#8097a1; }
+    .angles { display:grid; grid-template-columns:repeat(3,1fr); border-top:1px solid var(--line); background:#132129; } .angle { padding:17px 21px 18px; } .angle+.angle { border-left:1px solid var(--line); } .angle-label { color:var(--muted); font-size:12px; } .angle-num { margin:5px 0 0; font-size:29px; line-height:1.3; font-weight:500; font-variant-numeric:tabular-nums; letter-spacing:-1px; } .angle-num small { font-size:15px; color:#728c98; margin-left:3px; }
+    .view-note { margin:12px 3px 0; color:var(--muted); font-size:12px; } .sidebar { display:grid; gap:14px; } .section { padding:18px 19px; } .section-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:16px; } .section-head h2 { font-size:14px; } .section-head .minor { font-size:11px; } .data-grid { display:grid; grid-template-columns:1fr 1fr; gap:17px 12px; } .metric .label { color:var(--muted); font-size:11px; margin-bottom:3px; } .metric .value { font:21px/1.2 "Segoe UI",sans-serif; font-variant-numeric:tabular-nums; } .metric .value small { font-size:11px; color:#78909c; margin-left:4px; } .metric .value.word { font-size:15px; padding-top:3px; }
+    #connectionMessage { color:var(--muted); font-size:11px; margin-top:15px; padding-top:13px; border-top:1px solid var(--line); min-height:31px; overflow-wrap:anywhere; }
+    .axis-table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; } .axis-table th { font-size:10px; color:#819ba8; font-weight:400; text-align:right; padding:0 0 8px; } .axis-table th:first-child { text-align:left; } .axis-table td { padding:6px 0; text-align:right; font:13px Consolas,monospace; } .axis-table td:first-child { text-align:left; font-weight:600; } .axis-table tr+tr td { border-top:1px solid #203038; }
+    .health { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:13px; } .health-cell { padding:7px 5px; background:#0d181f; border:1px solid #20343d; border-radius:7px; text-align:center; } .health-cell .label { font-size:9px; color:#7f98a5; } .health-cell .value { font:13px/1.8 Consolas,monospace; } .health-cell .value.ok { color:var(--mint); } .health-cell .value.bad { color:var(--red); }
+    button { border:1px solid #35505c; color:var(--text); border-radius:8px; background:#1b2d37; padding:9px 12px; cursor:pointer; transition:background .15s,border-color .15s; } button:hover:not(:disabled) { background:#28414b; border-color:#5d7d8a; } button:disabled { opacity:.35; cursor:not-allowed; } button.primary { background:var(--mint); color:#072820; border-color:var(--mint); font-weight:650; width:100%; } button.primary:hover:not(:disabled) { background:#8befd3; } .button-row { margin-top:8px; display:grid; grid-template-columns:1fr 1fr; gap:8px; } .button-row button { font-size:12px; padding:8px; }
+    .select-label { display:block; color:var(--muted); font-size:11px; margin:17px 0 6px; } select { width:100%; background:#0e1c23; color:#c6d7df; padding:9px 10px; border:1px solid #314b57; border-radius:7px; font-size:12px; }
+    #zeroNote { margin:11px 0 0; font-size:11px; color:#8aa5b0; line-height:1.7; } .guide { border-left:2px solid #3e766c; padding:0 0 0 12px; margin:16px 0 0; color:#b6c9ce; font-size:12px; }
+    footer { margin:21px 2px 0; display:flex; justify-content:space-between; align-items:flex-start; gap:22px; color:#6f8996; font-size:11px; } footer p { margin:0; max-width:760px; } a { color:#9cb6c3; text-decoration:none; } a:hover { color:var(--mint); } #toast { position:fixed; z-index:10; left:50%; bottom:25px; transform:translateX(-50%); padding:10px 18px; border:1px solid #416158; background:#173930; color:#c4f8e8; border-radius:8px; font-size:13px; box-shadow:0 10px 30px #0005; } #toast[hidden] { display:none; }
+    @media(max-width:1000px) { .shell { padding:20px; } main { grid-template-columns:minmax(0,1fr) 300px; gap:14px; } .section { padding:16px; } .angle { padding:15px; } .angle-num { font-size:25px; } .viewport { min-height:410px; } .view-head { padding:16px; } }
+    @media(max-width:760px) { .shell { padding:17px 13px; } header { gap:12px; align-items:flex-start; } h1 { font-size:18px; } .brand { gap:9px; } .mark { width:35px; height:35px; border-radius:10px; } .head-right { gap:5px; max-width:145px; } .badge { font-size:10px; padding:5px 8px; } .subtitle { font-size:10px; } main { grid-template-columns:1fr; } .viewport { min-height:350px; height:49vh; } .sidebar { grid-template-columns:1fr 1fr; } .sidebar .controls-panel { grid-column:1/-1; } .section { padding:16px; } .angle-num { font-size:27px; } .view-head .minor { font-size:10px; } .mouse-hint { font-size:10px; } footer { flex-direction:column; gap:9px; } }
+    @media(max-width:430px) { .sidebar { grid-template-columns:1fr; } .data-grid { grid-template-columns:repeat(4,1fr); gap:9px; } .metric .value { font-size:18px; } .metric .label { font-size:9px; } .metric .value.word { font-size:13px; } .view-head .minor { display:none; } }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="brand"><div class="mark" aria-hidden="true"><svg width="27" height="27" viewBox="0 0 28 28" fill="none"><path d="M5 19V9l9-5 9 5v10l-9 5-9-5Z" stroke="currentColor" stroke-width="1.5"/><path d="m5 9 9 5 9-5M14 14v10M14 4v5" stroke="currentColor" stroke-width="1.5"/><circle cx="14" cy="14" r="2.5" fill="currentColor"/></svg></div><div><h1>Microduck <span style="font-weight:400;color:#9ab0ba">/ IMU</span></h1><p class="subtitle">裸板运动验证 · 实时姿态工作台</p></div></div>
+    <div class="head-right"><span class="badge" id="modeBadge">等待数据源</span><span class="badge status" id="statusBadge" role="status"><span class="dot"></span><span id="statusText">正在连接</span></span></div>
+  </header>
+  <main>
+    <div>
+      <section class="panel" aria-label="三维姿态视图">
+        <div class="view-head"><div><div class="eyebrow">LIVE ATTITUDE</div><h2>晃动板子，鸭子跟随转动</h2></div><span class="minor" id="referenceLabel">等待初始姿态</span></div>
+        <div class="viewport" id="viewWrap">
+          <canvas id="view" aria-label="Microduck 三维模型，拖动鼠标可旋转观察视角"></canvas>
+          <div class="view-top"><span class="view-tag">BODY ORIENTATION<br>STM32G031 / LSM6DSV16X</span><span id="modelState">正在载入本地模型…</span></div>
+          <div id="overlay"><strong id="overlayTitle">等待 IMU 数据</strong><span id="overlayText">模型就绪后，连接到板子即可开始</span></div>
+          <div class="view-bottom"><div class="axis-legend"><span class="x">X 前</span><span class="y">Y 左</span><span class="z">Z 上</span></div><span class="mouse-hint">拖动旋转视角 · 滚轮缩放</span></div>
+        </div>
+        <div class="angles"><div class="angle"><div class="angle-label">横滚 Roll</div><div class="angle-num"><span id="roll">—</span><small>°</small></div></div><div class="angle"><div class="angle-label">俯仰 Pitch</div><div class="angle-num"><span id="pitch">—</span><small>°</small></div></div><div class="angle"><div class="angle-label">偏航 Yaw</div><div class="angle-num"><span id="yaw">—</span><small>°</small></div></div></div>
+      </section>
+      <p class="view-note">姿态驱动整只鸭子的旋转；关节保持模型站姿。网格是固定参考平面。</p>
+    </div>
+    <aside class="sidebar">
+      <section class="panel section"><div class="section-head"><h2>数据连接</h2><span class="minor" id="probeLabel">J-Link · SWD</span></div><div class="data-grid"><div class="metric"><div class="label">参考电压</div><div class="value"><span id="voltage">—</span><small>V</small></div></div><div class="metric"><div class="label">电脑读取速率</div><div class="value"><span id="rate">—</span><small>Hz</small></div></div><div class="metric"><div class="label">IMU 采样计数</div><div class="value"><span id="sampleCount">—</span></div></div><div class="metric"><div class="label">传感器状态</div><div class="value word" id="sensorState">等待连接</div></div></div><div id="connectionMessage" aria-live="polite">正在连接本机数据服务…</div><div class="button-row"><button id="disconnect" disabled title="释放 J-Link，之后可重新使用 Keil 调试">断开连接</button><button id="reconnect" disabled>重新连接</button></div></section>
+      <section class="panel section"><div class="section-head"><h2>六轴原始响应</h2><span class="minor">板子坐标系</span></div><table class="axis-table"><thead><tr><th>轴</th><th>加速度 · g</th><th>角速度 · °/s</th></tr></thead><tbody><tr><td class="x">X</td><td id="ax">—</td><td id="gx">—</td></tr><tr><td class="y">Y</td><td id="ay">—</td><td id="gy">—</td></tr><tr><td class="z">Z</td><td id="az">—</td><td id="gz">—</td></tr></tbody></table><div class="health"><div class="health-cell"><div class="label">IMU 错误</div><div class="value" id="imuErrors">—</div></div><div class="health-cell"><div class="label">SPI 错误</div><div class="value" id="spiErrors">—</div></div><div class="health-cell"><div class="label">FIFO 错误</div><div class="value" id="fifoErrors">—</div></div></div></section>
+      <section class="panel section controls-panel"><div class="section-head"><h2>显示校准</h2><span class="minor">仅影响此页面</span></div><button class="primary" id="zero" disabled>当前姿态归零</button><div class="button-row"><button id="raw" disabled>原始姿态</button><button id="resetCamera">重置视角</button></div><label class="select-label" for="mounting">板子安装方向 → 鸭子坐标系</label><select id="mounting"><option value="identity">默认：X 向前 / Y 向左 / Z 向上</option><option value="z90">绕 Z +90°：X 向左 / Y 向后</option><option value="z180">绕 Z 180°：X 向后 / Y 向右</option><option value="z-90">绕 Z −90°：X 向右 / Y 向前</option><option value="x90">绕 X +90°：Y 向上 / Z 向右</option><option value="x-90">绕 X −90°：Y 向下 / Z 向左</option><option value="y90">绕 Y +90°：X 向下 / Z 向前</option><option value="y-90">绕 Y −90°：X 向上 / Z 向后</option></select><p id="zeroNote">首次收到有效数据时，自动将当前姿态设为显示零位。不会改写板子或舵机。</p><p class="guide">先平放归零，再缓慢左右、前后倾斜。捏住板边，保持供电和 J-Link 接线牢固。</p></section>
+    </aside>
+  </main>
+  <footer><p>六轴 IMU 的偏航会随时间漂移；此页显示相对姿态，不测量位移，也不判断实物平衡或脚底接触。断流后保留最后一帧并明确标记。</p><p>模型与工具源自 <a href="https://github.com/fanhao375/microduck-replica/tree/master/tools/servo-web" target="_blank" rel="noopener noreferrer">Microduck / servo-web ↗</a></p></footer>
+</div>
+<div id="toast" role="status" hidden></div>
+<script type="importmap">{"imports":{"three":"/vendor/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from '/vendor/OrbitControls.js';
+
+const $ = id => document.getElementById(id);
+const state = { latest:null, lastValid:null, reference:null, raw:false, valid:false, status:'disconnected', mode:null, modelLoaded:false, modelError:null, lastReceive:0, lastSampleCount:null, testInjected:false, updates:0 };
+const target = new THREE.Quaternion(), displayed = new THREE.Quaternion(), mounting = new THREE.Quaternion();
+let socket, reconnectTimer, retry = 800, toastTimer, controlToken=null, controlBusy=false;
+function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 2400); }
+const finite = value => typeof value === 'number' && Number.isFinite(value);
+const vectorOK = value => Array.isArray(value) && value.length === 3 && value.every(finite);
+const number = (value, digits=0) => finite(value) ? value.toFixed(digits) : '—';
+function errorValue(id,value) { $(id).textContent=number(value); $(id).className='value'+(finite(value)?(value===0?' ok':' bad'):''); }
+function clearMotionValues() { ['roll','pitch','yaw','ax','ay','az','gx','gy','gz'].forEach(id=>$(id).textContent='—'); }
+function setOverlay(title, detail) { $('overlayTitle').textContent=title; $('overlayText').textContent=detail; $('overlay').hidden=false; }
+function setValidity(valid) { state.valid=valid; $('zero').disabled=!valid; $('raw').disabled=!valid; if (!valid) clearMotionValues(); }
+
+function updateTarget() {
+  if (!state.lastValid) return;
+  const input = new THREE.Quaternion().fromArray(state.lastValid.quaternion_xyzw).normalize();
+  if(state.raw||!state.reference) {
+    // Sensor→world composed with body→sensor produces body→world.
+    target.copy(input).multiply(mounting.clone().invert()).normalize();
+  }else{
+    // Display-zero expresses the change in the initial body frame.
+    const relative=state.reference.clone().invert().multiply(input);
+    target.copy(mounting).multiply(relative).multiply(mounting.clone().invert()).normalize();
+  }
+  if (displayed.dot(target)<0) target.set(-target.x,-target.y,-target.z,-target.w);
+  const q=target;
+  // Standard intrinsic Z-Y-X yaw/pitch/roll, in the displayed right-handed basis.
+  const roll=Math.atan2(2*(q.w*q.x+q.y*q.z),1-2*(q.x*q.x+q.y*q.y));
+  const pitch=Math.asin(THREE.MathUtils.clamp(2*(q.w*q.y-q.z*q.x),-1,1));
+  const yaw=Math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z));
+  [['roll',roll],['pitch',pitch],['yaw',yaw]].forEach(([id,v])=>$(id).textContent=(v*180/Math.PI).toFixed(1));
+}
+
+function receive(packet, provenance='socket') {
+  if (!packet || packet.type!=='imu') return;
+  if (provenance==='test') { packet={...packet,mode:'demo',coherence:'demo',message:'测试注入数据 · 不代表硬件读数'}; state.testInjected=true; }
+  else if(state.testInjected) return;
+  state.latest=packet; state.lastReceive=performance.now(); state.updates++;
+  if (state.mode !== null && state.mode !== packet.mode) { state.reference=null; state.lastSampleCount=null; }
+  state.mode=packet.mode;
+  $('modeBadge').textContent = packet.mode==='demo' ? (state.testInjected?'测试注入 · 非硬件':'演示模式 · 非硬件') : '真实板卡 · J-Link';
+  $('modeBadge').className='badge'+(packet.mode==='demo'?' demo':'');
+  $('probeLabel').textContent=packet.mode==='demo'?'软件演示数据':'J-Link · SWD';
+  $('disconnect').title=packet.mode==='demo'?'暂停软件演示，不操作硬件':'释放 J-Link，之后可重新使用 Keil 调试';
+  $('voltage').textContent=number(finite(packet.voltage_mv)?packet.voltage_mv/1000:null,3);
+  $('rate').textContent=number(packet.hz,1);
+  $('sampleCount').textContent=finite(packet.sample_count)?packet.sample_count.toLocaleString('en-US'):'—';
+  $('sensorState').textContent=packet.mode==='demo'?(packet.live?'演示就绪':'演示已暂停'):(packet.connected?(packet.ready&&packet.configured?'已就绪':'未就绪'):'未连接');
+  $('sensorState').style.color=(packet.connected||packet.mode==='demo')&&packet.ready&&packet.configured?'var(--mint)':'var(--amber)';
+  errorValue('imuErrors',packet.error ?? packet.errors?.imu); errorValue('spiErrors',packet.errors?.spi); errorValue('fifoErrors',packet.errors?.fifo);
+  $('connectionMessage').textContent=packet.mode==='demo'&&packet.status==='disconnected'?'演示已暂停，点击“重新连接”继续演示。':(packet.message || (packet.mode==='demo'?'软件生成的演示数据，不连接板子。':'数据来自板子 RAM，仅执行读取。'));
+  const q=packet.quaternion_xyzw;
+  const qOK=Array.isArray(q)&&q.length===4&&q.every(finite)&&Math.hypot(...q)>.5&&Math.hypot(...q)<1.5;
+  const valid=packet.live===true&&packet.status==='live'&&packet.ready===1&&packet.configured===1&&qOK;
+  setValidity(valid);
+  state.status=valid?'live':(packet.status==='live'?'stale':packet.status||'disconnected');
+  $('statusText').textContent=valid?'实时跟随':({stale:'数据已停滞',error:packet.mode==='demo'?'演示异常':'连接异常',disconnected:packet.mode==='demo'?'演示已暂停':'未连接板子'}[state.status]||'等待有效数据');
+  $('statusBadge').className='badge status '+(valid?'ok':state.status==='error'?'bad':'');
+  if (!valid) {
+    if(packet.mode==='demo')setOverlay(state.status==='disconnected'?'演示已暂停':'演示数据暂不可用','点击“重新连接”继续演示；无需连接硬件');
+    else setOverlay(packet.connected?'数据暂不可用':'等待连接板子',packet.connected?'模型保留最后一帧；数值暂不显示':'检查接线，并让 Keil 退出调试以释放 J-Link');
+    return;
+  }
+  if (finite(state.lastSampleCount)&&finite(packet.sample_count)&&packet.sample_count<state.lastSampleCount) { state.reference=null; toast('检测到采样计数重新开始，已重新对齐初始姿态'); }
+  state.lastSampleCount=packet.sample_count;
+  state.lastValid=packet;
+  if (!state.reference&&!state.raw) { state.reference=new THREE.Quaternion().fromArray(q).normalize(); $('referenceLabel').textContent='相对姿态 · 初始位置已归零'; }
+  if (!state.modelError) $('overlay').hidden=true;
+  updateTarget();
+  ['x','y','z'].forEach((axis,i)=>{ $('a'+axis).textContent=number(vectorOK(packet.accel_g)?packet.accel_g[i]:null,3); $('g'+axis).textContent=number(vectorOK(packet.gyro_dps)?packet.gyro_dps[i]:null,2); });
+}
+
+function zero() {
+  if(!state.valid||!state.lastValid) return false;
+  state.reference=new THREE.Quaternion().fromArray(state.lastValid.quaternion_xyzw).normalize(); state.raw=false;
+  $('referenceLabel').textContent='相对姿态 · 当前姿态已归零'; $('zeroNote').textContent='显示零位已更新。仅在浏览器中相对旋转，不改写板子或舵机。';
+  updateTarget(); displayed.copy(target); toast('已将当前姿态设为显示零位'); return true;
+}
+function raw() { if(!state.valid) return false; state.raw=true; $('referenceLabel').textContent='原始姿态 · 相对于 IMU 启动参考'; $('zeroNote').textContent='当前使用 IMU 原始四元数，仍应用安装方向转换。可随时重新设置显示零位。'; updateTarget(); return true; }
+$('zero').addEventListener('click',zero); $('raw').addEventListener('click',raw);
+function setMount(value) {
+  const map={identity:['z',0],z90:['z',90],z180:['z',180],'z-90':['z',-90],x90:['x',90],'x-90':['x',-90],y90:['y',90],'y-90':['y',-90]};
+  if(!map[value]) return false;
+  const [axis,deg]=map[value]; const v=new THREE.Vector3(axis==='x'?1:0,axis==='y'?1:0,axis==='z'?1:0);
+  mounting.setFromAxisAngle(v,THREE.MathUtils.degToRad(deg)); $('mounting').value=value;
+  if(state.valid) updateTarget(); return true;
+}
+$('mounting').addEventListener('change',e=>setMount(e.target.value));
+
+function disconnected(detail='与本机服务的连接已断开，正在自动重试…') {
+  if(state.testInjected) return;
+  state.status='disconnected'; setValidity(false); $('statusText').textContent=state.mode==='demo'?'演示服务中断':'连接中断'; $('statusBadge').className='badge status bad'; $('sensorState').textContent=state.mode==='demo'?'演示已暂停':'未连接'; $('sensorState').style.color='var(--amber)'; $('rate').textContent='—'; $('connectionMessage').textContent=detail;
+  setOverlay(state.mode==='demo'?'演示服务连接已断开':'数据连接已断开','模型保留最后一帧；恢复连接后自动继续');
+}
+function connect() {
+  const protocol=location.protocol==='https:'?'wss:':'ws:';
+  socket=new WebSocket(`${protocol}//${location.host}/ws/imu`);
+  socket.onopen=()=>{retry=800;fetchStatus(true).catch(()=>{});};
+  socket.onmessage=e=>{try{receive(JSON.parse(e.data));}catch(error){console.warn('Invalid IMU message',error);}};
+  socket.onerror=()=>{};
+  socket.onclose=()=>{disconnected();clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connect,retry);retry=Math.min(retry*1.5,5000);};
+}
+async function fetchStatus(onlyIfEmpty=false) {
+  const response=await fetch('/api/status',{cache:'no-store'});
+  if(!response.ok) throw new Error('状态服务暂不可用');
+  const packet=await response.json();
+  if(packet.control_token) { controlToken=packet.control_token; if(!controlBusy){$('disconnect').disabled=false;$('reconnect').disabled=false;} }
+  if(!onlyIfEmpty||!state.latest)receive(packet);
+  return packet;
+}
+async function control(action) {
+  if(controlBusy||!controlToken)return;
+  controlBusy=true;$('disconnect').disabled=true;$('reconnect').disabled=true;
+  try {
+    const response=await fetch('/api/'+action,{method:'POST',headers:{'X-IMU-Control-Token':controlToken}});
+    if(!response.ok){let info;try{info=await response.json();}catch{}throw new Error(info?.message||info?.error||'服务未能完成操作');}
+    await fetchStatus();
+    toast(state.mode==='demo'?(action==='disconnect'?'演示已暂停，点击“重新连接”继续演示':'正在恢复软件演示'):(action==='disconnect'?'已断开数据连接；J-Link 可交还 Keil':'正在重新连接数据源'));
+  }catch(error){toast(error.message);}
+  finally{controlBusy=false;$('disconnect').disabled=!controlToken;$('reconnect').disabled=!controlToken;}
+}
+$('disconnect').addEventListener('click',()=>control('disconnect'));
+$('reconnect').addEventListener('click',()=>control('reconnect'));
+fetchStatus(true).catch(()=>{});
+connect();
+setInterval(()=>{if(state.valid&&performance.now()-state.lastReceive>1500){state.status='stale';setValidity(false);$('statusText').textContent='数据已停滞';$('statusBadge').className='badge status bad';$('rate').textContent='—';setOverlay('超过 1.5 秒未收到新数据',state.mode==='demo'?'模型保留最后一帧；请重新连接演示服务':'模型保留最后一帧；请检查板子与 J-Link 连接');}},250);
+
+const canvas=$('view');
+let renderer,scene,camera,controls,duckRoot;
+let viewSize=.34,viewCenter=new THREE.Vector3(0,0,.10),lastFrame=performance.now();
+function resetCamera() { if(!camera||!controls)return; camera.position.copy(viewCenter).add(new THREE.Vector3(1.4,-1.7,.95).multiplyScalar(viewSize)); controls.target.copy(viewCenter); controls.update(); }
+$('resetCamera').addEventListener('click',resetCamera);
+try {
+  renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.outputColorSpace=THREE.SRGBColorSpace;
+  scene=new THREE.Scene(); camera=new THREE.PerspectiveCamera(37,1,.005,20); camera.up.set(0,0,1);
+  controls=new OrbitControls(camera,canvas); controls.enableDamping=true;controls.dampingFactor=.07;controls.minDistance=.10;controls.maxDistance=3;controls.maxPolarAngle=Math.PI*.9; resetCamera();
+  scene.add(new THREE.HemisphereLight(0xdff5ff,0x243e35,2));
+  const key=new THREE.DirectionalLight(0xfff3df,2.1);key.position.set(.7,-.8,1.2);scene.add(key);
+  const fill=new THREE.DirectionalLight(0x85baff,1);fill.position.set(-.5,.6,.5);scene.add(fill);
+  const grid=new THREE.GridHelper(.9,18,0x3b6268,0x223b46);grid.rotation.x=Math.PI/2;grid.material.transparent=true;grid.material.opacity=.6;scene.add(grid);
+  duckRoot=new THREE.Group();scene.add(duckRoot);
+  const axes=new THREE.AxesHelper(.075);axes.position.set(-.26,-.21,.002);scene.add(axes);
+  async function loadModel() {
+    const [jsonResponse,binResponse]=await Promise.all([fetch('/model/model.json'),fetch('/model/meshes.bin')]);
+    if(!jsonResponse.ok||!binResponse.ok)throw new Error('缺少 model/model.json 或 meshes.bin');
+    const mj=await jsonResponse.json(),bin=await binResponse.arrayBuffer(),geoms={};
+    for(const [name,m] of Object.entries(mj.meshes)) {
+      const quantized=new Int16Array(bin,m.voff,m.nverts*3),positions=new Float32Array(m.nverts*3);
+      for(let i=0;i<m.nverts;i++)for(let k=0;k<3;k++)positions[i*3+k]=m.bbox_min[k]+(quantized[i*3+k]+32768)/65535*(m.bbox_max[k]-m.bbox_min[k]||1);
+      const indices=m.index_bytes===2?new Uint16Array(bin,m.ioff,m.ntris*3):new Uint32Array(bin,m.ioff,m.ntris*3);
+      const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));geometry.setIndex(new THREE.BufferAttribute(indices,1));geometry.computeVertexNormals();geoms[name]=geometry;
+    }
+    const content=new THREE.Group(),objects=[];
+    const quat=q=>new THREE.Quaternion(q[1],q[2],q[3],q[0]);
+    const defaultPose={20:0,21:-.0873,22:-.4579,23:-.0049,24:.4530,30:.3491,31:.3491,32:0,33:0,34:0,10:0,11:.0873,12:.4579,13:.0049,14:-.4530};
+    let trunkPivot=null;
+    mj.bodies.forEach((body,i)=>{
+      const node=new THREE.Group();node.name=body.name;node.position.set(...body.pos);node.quaternion.copy(quat(body.quat));let inner=node;
+      if(body.joint){inner=new THREE.Group();node.add(inner);const angle=defaultPose[body.joint.id];if(finite(angle))inner.quaternion.setFromAxisAngle(new THREE.Vector3(...body.joint.axis).normalize(),angle);}
+      for(const geom of body.geoms){const rgba=geom.rgba;const material=new THREE.MeshStandardMaterial({color:new THREE.Color(rgba[0],rgba[1],rgba[2]),roughness:.65,metalness:.06,flatShading:true,transparent:rgba[3]<1,opacity:rgba[3]});const mesh=new THREE.Mesh(geoms[geom.mesh],material);mesh.position.set(...geom.pos);mesh.quaternion.copy(quat(geom.quat));inner.add(mesh);}
+      objects.push({node,inner});if(body.parent<0){content.add(node);if(!trunkPivot)trunkPivot=node.position.clone();}else objects[body.parent].inner.add(node);
+    });
+    // Rotate around the root/trunk, not the global origin beneath the feet.
+    if(trunkPivot)content.position.sub(trunkPivot);
+    // Measure detached from the animated parent so arriving live samples cannot distort framing.
+    content.updateMatrixWorld(true);const box=new THREE.Box3().setFromObject(content);const size=box.getSize(new THREE.Vector3());duckRoot.add(content);
+    duckRoot.position.z=-box.min.z+.008;
+    viewSize=Math.max(size.x,size.y,size.z,.2);viewCenter=box.getCenter(new THREE.Vector3()).add(duckRoot.position);resetCamera();
+    state.modelLoaded=true;$('modelState').textContent='模型已加载 · 固定站姿';
+  }
+  loadModel().catch(error=>{state.modelError=error.message;$('modelState').textContent='模型加载失败';setOverlay('模型未能加载',error.message);console.error(error);});
+  function frame(now){const delta=Math.min((now-lastFrame)/1000,.1);lastFrame=now;const width=canvas.clientWidth,height=canvas.clientHeight;if(width&&height&&(canvas.width!==Math.floor(width*renderer.getPixelRatio())||canvas.height!==Math.floor(height*renderer.getPixelRatio()))){renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix();}if(state.valid){displayed.slerp(target,1-Math.exp(-18*delta));duckRoot.quaternion.copy(displayed);}controls.update();renderer.render(scene,camera);requestAnimationFrame(frame);}
+  requestAnimationFrame(frame);
+}catch(error){state.modelError=error.message;$('modelState').textContent='WebGL 不可用';setOverlay('无法初始化三维视图','请使用支持 WebGL 的浏览器；右侧仍可观察实际数据。');console.error(error);}
+
+// Explicit browser-test entry point. Every injected sample is visibly marked non-hardware.
+window.__imuView={
+  injectSample:packet=>{receive(packet,'test');return window.__imuView.getState();},
+  clearInjection:()=>{state.testInjected=false;state.mode=null;state.reference=null;state.lastSampleCount=null;state.lastValid=null;setValidity(false);fetchStatus().catch(()=>{});},
+  zero,raw,setMount,resetCamera,
+  getState:()=>({modelLoaded:state.modelLoaded,modelError:state.modelError,valid:state.valid,status:state.status,mode:state.mode,reference:state.reference?.toArray()||null,raw:state.raw,target:target.toArray(),displayed:displayed.toArray(),mounting:mounting.toArray(),sampleCount:state.latest?.sample_count??null,testInjected:state.testInjected,updates:state.updates,overlay:$('overlay').hidden?null:$('overlayTitle').textContent})
+};
+</script>
+</body>
+</html>

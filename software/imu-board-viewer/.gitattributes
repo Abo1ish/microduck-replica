@@ -1,0 +1,11 @@
+# Text stays stable across checkouts; Windows command scripts require CRLF.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bin binary
+*.pdf binary
+*.zip binary
+*.hex -text
+*.map -text
+firmware/imu_to_dxl/Build/* linguist-generated=true
+firmware/imu_to_dxl/Drivers/** linguist-vendored=true
+tools/servo-web-imu/vendor/** linguist-vendored=true
